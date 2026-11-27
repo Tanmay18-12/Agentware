@@ -22,7 +22,7 @@ choke point.**
 Intended user: a single calendar owner (demo persona `owner@example.com`, timezone
 `Asia/Kolkata`), plus judges/operators who watch and can kill the agent from a dashboard.
 
-### Objectives (from `MeetingPilot_Master_Plan.md`)
+### Objectives
 
 1. Complete the meeting-request workflow end-to-end, offline.
 2. Enforce guardrails in code, not prompts.
@@ -92,7 +92,6 @@ No project import is missing from `pyproject.toml`. No version conflict was repo
 ├── PROJECT_OVERVIEW.md       # this document
 ├── DEVELOPMENT_GUIDE.md      # run/debug handbook
 ├── PROJECT_STATUS.md         # status, bugs, roadmap
-├── MeetingPilot_Master_Plan.md / _Master_Prompt.md   # supplied hackathon material
 ├── .agentware.toml           # track T1 + name + pitch (submission metadata)
 ├── pyproject.toml / uv.lock  # deps, console script, pytest config
 ├── Makefile                  # setup / seed / demo / test / serve / infra

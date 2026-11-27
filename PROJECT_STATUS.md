@@ -123,7 +123,6 @@ concurrent clients this can block the event loop. Local-only today.
 - `opentelemetry-api` and other packages in `uv pip list` are transitive (FastAPI), not direct project
   dependencies; nothing is imported but missing from `pyproject.toml`.
 - No `TODO`/`FIXME` markers exist in `src/`, `tests/`, `scripts/` or `static/`.
-- `MeetingPilot_Master_Plan.md` has no Section 12; the docs build on Sections 1–11 only.
 
 ## 4. Technical debt
 
