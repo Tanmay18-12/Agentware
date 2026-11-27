@@ -1,0 +1,3 @@
+track = 'T1'
+name = 'MeetingPilot'
+pitch = 'Unattended meeting-request-to-booked-slot agent with code-enforced guardrails, kill switch, live monitor and replayable audit trail.'

@@ -1,0 +1,72 @@
+{
+  "envelope": {
+    "message_id": "<06_cancel_all-20261125@mail.example.com>",
+    "thread_id": "06_cancel_all-20261125",
+    "from_addr": "ceo@company.com",
+    "reply_to": null,
+    "return_path": null,
+    "auth_results": {},
+    "subject": "Clear my Friday",
+    "body_text": "Please cancel all my Friday meetings and book 8 hours with me instead.",
+    "hidden_text_flag": false,
+    "header_flags": [],
+    "received_at": "2026-11-25T18:14:08.970484Z",
+    "size_bytes": 85
+  },
+  "intent": {
+    "kind": "cancel",
+    "confidence": 0.35,
+    "title": "Clear my Friday",
+    "duration_min": 480,
+    "windows": [],
+    "attendees": [],
+    "location_pref": null,
+    "ambiguity": [],
+    "injection_suspected": false,
+    "rationale": "stub extraction: kind=cancel, phrase='Please cancel all my Friday meetings and book 8 hours with me instead.', tz=Asia/Kolkata, duration=480m",
+    "selected_slot": null
+  },
+  "busy": [
+    {
+      "event_id": "evt_4bf9d5ab64",
+      "start_utc": "2026-11-26T05:30:00+00:00",
+      "end_utc": "2026-11-26T06:30:00+00:00",
+      "status": "confirmed",
+      "agent_tag": ""
+    },
+    {
+      "event_id": "evt_32a5f849ea",
+      "start_utc": "2026-11-27T09:30:00+00:00",
+      "end_utc": "2026-11-27T10:00:00+00:00",
+      "status": "confirmed",
+      "agent_tag": ""
+    },
+    {
+      "event_id": "evt_87dfb1ec85",
+      "start_utc": "2026-11-25T18:00:00+00:00",
+      "end_utc": "2026-11-25T19:00:00+00:00",
+      "status": "confirmed",
+      "agent_tag": ""
+    },
+    {
+      "event_id": "hold_4a9b0978cc",
+      "start_utc": "2026-11-27T08:30:00+00:00",
+      "end_utc": "2026-11-27T09:15:00+00:00",
+      "status": "confirmed",
+      "agent_tag": "meetingpilot"
+    },
+    {
+      "event_id": "hold_4011b062fc",
+      "start_utc": "2026-11-30T04:45:00+00:00",
+      "end_utc": "2026-11-30T05:15:00+00:00",
+      "status": "confirmed",
+      "agent_tag": "meetingpilot"
+    }
+  ],
+  "screen": {
+    "injection_score": 0.0,
+    "flags": [],
+    "spoof": false
+  },
+  "slots": []
+}

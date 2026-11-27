@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MeetingPilot · live monitor</title>
+<style>
+  :root{
+    --bg:#0b0f16; --panel:#111826; --panel-2:#16202f; --line:#22304a;
+    --text:#e6edf7; --muted:#8fa3bf; --accent:#5aa9ff;
+    --ok:#38d39f; --warn:#f0b429; --bad:#ff5d6c; --killed:#ff2e63;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:18px;padding:14px 20px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#101a29,#0b0f16)}
+  h1{font-size:16px;margin:0;letter-spacing:.4px}
+  .pill{padding:3px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted);font-size:12px}
+  .pill.run{color:var(--ok);border-color:#1d5c46}
+  .pill.halt{color:#fff;background:var(--killed);border-color:var(--killed);font-weight:700}
+  .metrics{display:flex;gap:22px;margin-left:auto;align-items:center}
+  .metric{text-align:right}
+  .metric b{display:block;font-size:16px}
+  .metric span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--text);padding:7px 13px}
+  button:hover{border-color:var(--accent)}
+  button.kill{background:var(--killed);border-color:var(--killed);font-weight:700;letter-spacing:.5px;padding:10px 18px}
+  button.ok{background:#154b3a;border-color:#1d5c46}
+  main{padding:16px 20px;display:grid;gap:16px;grid-template-columns:1.35fr 1fr}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .card h2{margin:0 0 10px;font-size:12px;letter-spacing:.9px;text-transform:uppercase;color:var(--muted)}
+  .stepper{display:grid;grid-template-columns:repeat(10,1fr);gap:6px;grid-column:1/-1}
+  .step{border:1px solid var(--line);border-radius:8px;padding:7px 6px;font-size:10.5px;text-align:center;color:var(--muted);background:#0e1622}
+  .step b{display:block;font-size:12px;color:var(--text)}
+  .step.running{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;color:var(--accent)}
+  .step.ok{border-color:#1d5c46;color:var(--ok)}
+  .step.warn{border-color:#6b5314;color:var(--warn)}
+  .step.bad{border-color:#6d2530;color:var(--bad)}
+  .feed{max-height:420px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+  .row{display:flex;gap:8px;padding:3px 0;border-bottom:1px dashed #1a2434}
+  .row .t{color:#5d7290;min-width:52px}
+  .tag{padding:0 6px;border-radius:5px;font-size:10.5px;border:1px solid var(--line)}
+  .ALLOW,.ok{color:var(--ok);border-color:#1d5c46}
+  .GATE{color:var(--warn);border-color:#6b5314}
+  .BLOCK,.LIMIT,.bad{color:var(--bad);border-color:#6d2530}
+  .approval{border:1px solid #4a3a15;background:#1b1608;border-radius:10px;padding:10px;margin-bottom:10px}
+  .approval p{margin:6px 0;color:var(--muted);font-size:12px;white-space:pre-wrap;max-height:120px;overflow:auto}
+  .approval .actions{display:flex;gap:8px;margin-top:8px}
+  .tabs{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+  .tabs button{padding:5px 10px;font-size:12px}
+  .tabs button.active{border-color:var(--accent);color:var(--accent)}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  td,th{text-align:left;padding:5px 6px;border-bottom:1px solid #1a2434;vertical-align:top}
+  th{color:var(--muted);font-weight:500}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .sub{color:var(--muted);font-size:11px}
+  input,textarea{width:100%;background:#0d1521;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font:inherit}
+  textarea{min-height:70px;resize:vertical}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  footer{padding:0 20px 22px;color:#5d7290;font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <h1>MeetingPilot</h1>
+  <span id="mode" class="pill">mock</span>
+  <span id="status" class="pill run">RUNNING</span>
+  <div class="metrics">
+    <div class="metric"><b id="m-cost">$0.000</b><span>cost / run cap $0.25</span></div>
+    <div class="metric"><b id="m-runs">0</b><span>runs</span></div>
+    <div class="metric"><b id="m-min">0.0</b><span>minutes saved</span></div>
+    <div class="metric"><b id="m-int">0</b><span>human interventions</span></div>
+    <button id="kill" class="kill">KILL</button>
+    <button id="resume" class="ok">RESUME</button>
+  </div>
+</header>
+
+<main>
+  <div class="card stepper" id="stepper"></div>
+
+  <section class="card">
+    <h2>Live tool &amp; policy feed</h2>
+    <div class="feed" id="feed"></div>
+  </section>
+
+  <section class="card">
+    <h2>Approval queue <span id="queue-count" class="sub"></span></h2>
+    <div id="approvals"><p class="sub">Nothing waiting.</p></div>
+  </section>
+
+  <section class="card" style="grid-column:1/-1">
+    <h2>Mock world inspector</h2>
+    <div class="tabs" id="tabs">
+      <button data-tab="samples" class="active">Samples</button>
+      <button data-tab="inbox">Inbox</button>
+      <button data-tab="outbox">Outbox</button>
+      <button data-tab="calendar">Calendar</button>
+      <button data-tab="drafts">Drafts</button>
+    </div>
+    <div id="world"></div>
+    <div style="margin-top:14px" class="grid2">
+      <div>
+        <div class="sub">From</div><input id="inj-from" value="dana@company.com" />
+      </div>
+      <div>
+        <div class="sub">Subject</div><input id="inj-subject" value="Meeting request: design review" />
+      </div>
+    </div>
+    <div class="sub" style="margin-top:8px">Body</div>
+    <textarea id="inj-body">Hi Tanmay, can we meet tomorrow at 15:00 IST for 30 minutes?</textarea>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button id="inject">Inject email</button>
+      <button id="refresh">Refresh state</button>
+    </div>
+  </section>
+</main>
+<footer>SSE stream · hash-chained traces in <span class="mono">traces/</span> · kill switch mirrored to <span class="mono">.kill</span></footer>
+
+<script>
+const STEPS = ["ingest","prefilter","screen","reader","validate","schedule","decide","act","verify","record"];
+const state = { world: [], tab: "samples", kill: {} };
+const $ = (id) => document.getElementById(id);
+
+function paintHeader(s){
+  const ks = s.kill_switch || {};
+  state.kill = ks;
+  const badge = $("status");
+  badge.textContent = ks.state || "RUNNING";
+  badge.className = "pill " + (ks.triggered ? "halt" : "run");
+  const t = s.totals || {};
+  $("m-cost").textContent = "$" + (t.cost_today_usd ?? 0).toFixed(3);
+  $("m-runs").textContent = t.runs ?? 0;
+  $("m-min").textContent = (t.minutes_saved ?? 0).toFixed(1);
+  $("m-int").textContent = t.human_interventions ?? 0;
+  if (s.mode) $("mode").textContent = `mock=${s.mode.mock_mode ? 1 : 0} · llm=${s.mode.llm_mode}`;
+  state.world = s;
+  if (s.approvals) paintApprovals(s.approvals);
+  paintWorld();
+}
+
+function paintApprovals(list){
+  $("queue-count").textContent = list.length ? `(${list.length} pending)` : "";
+  const box = $("approvals");
+  if(!list.length){ box.innerHTML = '<p class="sub">Nothing waiting.</p>'; return; }
+  box.innerHTML = "";
+  for(const item of list){
+    const p = item.payload || {};
+    const el = document.createElement("div");
+    el.className = "approval";
+    el.innerHTML = `<b>${escapeHtml(p.subject || "(no subject)")}</b>
+      <div class="sub">to ${escapeHtml(p.to || "?")} · ${(p.reasons||[]).join(", ")}</div>
+      <p>${escapeHtml((p.body || "").slice(0, 500))}</p>
+      <div class="actions">
+        <button data-approve="${item.id}" class="ok">Approve &amp; send</button>
+        <button data-reject="${item.id}">Reject</button>
+      </div>`;
+    box.appendChild(el);
+  }
+  box.querySelectorAll("[data-approve]").forEach(b => b.onclick = () => act(`/api/approve/${b.dataset.approve}`));
+  box.querySelectorAll("[data-reject]").forEach(b => b.onclick = () => act(`/api/reject/${b.dataset.reject}`));
+}
+
+function paintStepper(statusByName){
+  const box = $("stepper");
+  box.innerHTML = "";
+  STEPS.forEach((name, index) => {
+    const el = document.createElement("div");
+    const cls = (statusByName && statusByName[name]) || "";
+    el.className = "step " + cls;
+    el.innerHTML = `<b>${index + 1}</b>${name}`;
+    box.appendChild(el);
+  });
+}
+const stepAlias = {ingest:"ingest",prefilter:"prefilter",screen:"screen",reader_llm:"reader",validate:"validate",schedule:"schedule",decide:"decide",act:"act",verify:"verify",record:"record"};
+
+const statusByName = {};
+function feed(html){
+  const el = document.createElement("div");
+  el.className = "row";
+  el.innerHTML = html;
+  const box = $("feed");
+  box.prepend(el);
+  while (box.children.length > 220) box.removeChild(box.lastChild);
+}
+
+function handleEvent(evt){
+  if (evt.type === "state") { paintHeader(evt.payload || {}); return; }
+  const payload = evt.payload || {};
+  const time = new Date().toLocaleTimeString();
+  const tagCls = payload.verdict || (payload.ok === false ? "BLOCK" : "");
+  const summary = payload.tool || payload.kind || payload.reason || payload.status || payload.outcome || evt.type;
+  const extra = payload.rule_ids ? ` ${payload.rule_ids.join(" ")}` : "";
+  const cls = ["ALLOW","GATE","BLOCK","LIMIT"].includes(payload.verdict) ? `tag ${payload.verdict}` : "tag";
+  feed(`<span class="t">${time}</span><span class="tag">${escapeHtml(evt.type)}</span>
+        <span class="${cls}">${escapeHtml(String(summary))}</span>
+        <span class="sub">${escapeHtml(extra)} ${escapeHtml(payload.explanation || payload.detail || "")}</span>`);
+
+  if (evt.type === "stage_start") statusByName[stepAlias[payload.name] || payload.name] = "running";
+  if (evt.type === "stage_end") {
+    const name = stepAlias[payload.name] || payload.name;
+    statusByName[name] = ["ok","skipped","quarantined","invalid","failed"].includes(payload.status) ? (payload.status === "ok" ? "ok" : "bad") : "ok";
+  }
+  if (evt.type === "decision") {
+    statusByName["decide"] = payload.kind === "QUARANTINE" ? "bad" : payload.kind === "ESCALATE" ? "warn" : "ok";
+  }
+  if (evt.type === "kill") statusByName["act"] = "bad";
+  paintStepper(statusByName);
+  if (["run_summary","approval_queued","approval_decided","run_start","kill","policy_violation"].includes(evt.type)) refresh();
+}
+
+function paintWorld(){
+  const s = state.world;
+  const box = $("world");
+  const tab = state.tab;
+  if (!s || !s[tab]) { box.innerHTML = '<p class="sub">No data yet.</p>'; return; }
+  if (tab === "calendar") {
+    const rows = s.calendar.map(e => `<tr><td class="mono">${escapeHtml(e.start_utc.slice(0,16))}</td>
+      <td>${escapeHtml(e.title)}</td><td>${escapeHtml(e.status)}</td>
+      <td class="sub">${e.agent_tag ? "agent" : "owner"}</td></tr>`).join("");
+    box.innerHTML = `<table><tr><th>start (UTC)</th><th>title</th><th>status</th><th>owner</th></tr>${rows}</table>`;
+    return;
+  }
+  if (tab === "outbox") {
+    const rows = s.outbox.map(m => `<tr><td class="mono">${escapeHtml(m.name)}</td><td class="sub">${escapeHtml(m.preview)}</td></tr>`).join("");
+    box.innerHTML = `<table><tr><th>file</th><th>body</th></tr>${rows || '<tr><td colspan="2" class="sub">Nothing sent yet.</td></tr>'}</table>`;
+    return;
+  }
+  const items = s[tab] || [];
+  box.innerHTML = items.length
+    ? `<table><tr><th>name</th><th>bytes</th><th></th></tr>${items.map(i =>
+        `<tr><td class="mono">${escapeHtml(i.name)}</td><td>${i.bytes}</td>
+         <td>${tab === "samples" ? `<button data-sample="${escapeHtml(i.name)}">Run</button>` : ""}</td></tr>`).join("")}</table>`
+    : '<p class="sub">Empty.</p>';
+  box.querySelectorAll("[data-sample]").forEach(b => b.onclick = () => act("/api/inject", {name: b.dataset.sample}));
+}
+
+async function act(url, body){
+  const options = {method:"POST", headers:{"Content-Type":"application/json"}};
+  if (body) options.body = JSON.stringify(body);
+  const response = await fetch(url, options);
+  await response.json().catch(() => ({}));
+  refresh();
+}
+
+async function refresh(){
+  const response = await fetch("/api/state");
+  paintHeader(await response.json());
+}
+
+$("tabs").querySelectorAll("button").forEach(btn => btn.onclick = () => {
+  state.tab = btn.dataset.tab;
+  $("tabs").querySelectorAll("button").forEach(b => b.classList.toggle("active", b === btn));
+  paintWorld();
+});
+$("kill").onclick = () => act("/api/kill");
+$("resume").onclick = () => act("/api/resume");
+$("refresh").onclick = refresh;
+$("inject").onclick = () => act("/api/inject", {
+  from: $("inj-from").value,
+  subject: $("inj-subject").value,
+  body: $("inj-body").value,
+  received_at: new Date().toISOString(),
+  message_id: `<web-${Date.now()}@meetingpilot.local>`,
+  thread_id: `web-${Date.now()}`,
+});
+
+function escapeHtml(value){
+  return String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+paintStepper(statusByName);
+refresh();
+const stream = new EventSource("/events");
+stream.onmessage = (message) => { try { handleEvent(JSON.parse(message.data)); } catch (e) { console.error(e); } };
+stream.onerror = () => feed(`<span class="t">--</span><span class="tag bad">stream</span> reconnecting…`);
+</script>
+</body>
+</html>

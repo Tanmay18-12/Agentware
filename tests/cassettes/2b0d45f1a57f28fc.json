@@ -1,0 +1,19 @@
+{
+  "message_id": "<07_newsletter-20261125@mail.example.com>",
+  "intent": {
+    "kind": "not_meeting",
+    "confidence": 0.35,
+    "title": "This week in platform engineering",
+    "duration_min": 30,
+    "windows": [],
+    "attendees": [],
+    "location_pref": null,
+    "ambiguity": [],
+    "injection_suspected": false,
+    "rationale": "stub extraction: kind=not_meeting, phrase='', tz=Asia/Kolkata, duration=30m",
+    "selected_slot": null
+  },
+  "model": "cassette:stub-recording",
+  "tokens": 0,
+  "cost_usd": 0.0
+}

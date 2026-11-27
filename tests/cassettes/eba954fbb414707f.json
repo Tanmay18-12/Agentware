@@ -1,0 +1,21 @@
+{
+  "message_id": "<03_slot_selection-20261125@mail.example.com>",
+  "intent": {
+    "kind": "slot_selection",
+    "confidence": 0.3,
+    "title": "Intro call with our platform team",
+    "duration_min": 30,
+    "windows": [],
+    "attendees": [],
+    "location_pref": null,
+    "ambiguity": [
+      "no_date_time"
+    ],
+    "injection_suspected": false,
+    "rationale": "stub extraction: kind=slot_selection, phrase='', tz=Asia/Kolkata, duration=30m",
+    "selected_slot": 1
+  },
+  "model": "cassette:stub-recording",
+  "tokens": 0,
+  "cost_usd": 0.0
+}

@@ -1,0 +1,49 @@
+owner:
+  name: "Tanmay"
+  email: "owner@example.com"
+  timezone: "Asia/Kolkata"
+
+working_hours:
+  start: "09:30"
+  end: "18:00"
+  days: [0, 1, 2, 3, 4]        # Mon-Fri (0=Mon)
+
+preferred_hours:
+  start: "10:00"
+  end: "16:00"
+
+buffers:
+  before_min: 10
+  after_min: 10
+
+min_notice_hours: 4
+max_meetings_per_day: 4
+max_attendees: 4
+booking_horizon_days: 30
+grid_min: 15
+max_proposals: 3
+no_meeting_days: []
+
+allowed_durations_min: [15, 30, 45, 60, 90]
+
+protected_blocks:
+  - { days: [0, 1, 2, 3, 4], start: "13:00", end: "14:00", label: "Lunch" }
+  - { days: [2], start: "15:00", end: "17:00", label: "Deep work" }
+
+senders:
+  allowed_domains: ["company.com", "partner.io", "example.com"]
+  blocked_domains: ["evil.com", "attacker.test"]
+  vip_senders: ["ceo@company.com"]
+  # Domains that may be booked without human approval even when external.
+  auto_approve_domains: ["company.com", "partner.io"]
+
+limits:
+  tool_calls_per_run: 25
+  cost_per_run_usd: 0.25
+  cost_per_day_usd: 5.00
+  wall_clock_per_run_s: 120
+  sends_per_hour: 10
+  bookings_per_day: 10
+  sender_emails_per_hour: 3
+
+meeting_url_prefix: "https://meet.example.com/"
