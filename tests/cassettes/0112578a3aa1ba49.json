@@ -1,0 +1,33 @@
+{
+  "message_id": "<05_external_multi-20261127@mail.example.com>",
+  "intent": {
+    "kind": "meeting_request",
+    "confidence": 0.92,
+    "title": "Vendor alignment session",
+    "duration_min": 90,
+    "windows": [
+      {
+        "start_iso": "2026-12-01T15:00:00+00:00",
+        "end_iso": "2026-12-01T16:30:00+00:00",
+        "raw_phrase": "We would like a 90 minute session with six of our stakeholders on 2026-12-01 at 15:00 UTC to discuss the contract and payment terms.",
+        "tz": "UTC",
+        "flexibility": "exact"
+      }
+    ],
+    "attendees": [
+      "a@acme-corp.test",
+      "b@acme-corp.test",
+      "c@acme-corp.test",
+      "d@acme-corp.test",
+      "e@acme-corp.test"
+    ],
+    "location_pref": null,
+    "ambiguity": [],
+    "injection_suspected": false,
+    "rationale": "stub extraction: kind=meeting_request, phrase='We would like a 90 minute session with six of our stakeholders on 2026-12-01 at 15:00 UTC to discuss the contract and payment terms.', tz=UTC, duration=90m",
+    "selected_slot": null
+  },
+  "model": "cassette:stub-recording",
+  "tokens": 0,
+  "cost_usd": 0.0
+}

@@ -1,0 +1,95 @@
+{
+  "envelope": {
+    "message_id": "<03_slot_selection-20261127@mail.example.com>",
+    "thread_id": "thread-conflict-01",
+    "from_addr": "rahul@partner.io",
+    "reply_to": null,
+    "return_path": null,
+    "auth_results": {},
+    "subject": "Re: Intro call with our platform team",
+    "body_text": "Option 2 works for me \u2014 thanks for the alternatives. See you then.",
+    "hidden_text_flag": false,
+    "header_flags": [],
+    "received_at": "2026-11-27T21:09:39.950202Z",
+    "size_bytes": 105
+  },
+  "intent": {
+    "kind": "slot_selection",
+    "confidence": 0.3,
+    "title": "Intro call with our platform team",
+    "duration_min": 30,
+    "windows": [],
+    "attendees": [],
+    "location_pref": null,
+    "ambiguity": [
+      "no_date_time"
+    ],
+    "injection_suspected": false,
+    "rationale": "stub extraction: kind=slot_selection, phrase='', tz=Asia/Kolkata, duration=30m",
+    "selected_slot": 1
+  },
+  "busy": [
+    {
+      "event_id": "evt_0994d55504",
+      "start_utc": "2026-11-30T05:30:00+00:00",
+      "end_utc": "2026-11-30T06:30:00+00:00",
+      "status": "confirmed",
+      "agent_tag": ""
+    },
+    {
+      "event_id": "evt_b908a49ff2",
+      "start_utc": "2026-12-01T09:30:00+00:00",
+      "end_utc": "2026-12-01T10:00:00+00:00",
+      "status": "confirmed",
+      "agent_tag": ""
+    },
+    {
+      "event_id": "evt_0a795b495e",
+      "start_utc": "2026-11-27T21:00:00+00:00",
+      "end_utc": "2026-11-27T22:00:00+00:00",
+      "status": "confirmed",
+      "agent_tag": ""
+    },
+    {
+      "event_id": "hold_4a004c3178",
+      "start_utc": "2026-12-04T08:30:00+00:00",
+      "end_utc": "2026-12-04T09:15:00+00:00",
+      "status": "confirmed",
+      "agent_tag": "meetingpilot"
+    }
+  ],
+  "screen": {
+    "injection_score": 0.0,
+    "flags": [],
+    "spoof": false
+  },
+  "slots": [
+    {
+      "start_utc": "2026-12-02T04:30:00Z",
+      "end_utc": "2026-12-02T05:00:00Z",
+      "score": 4.3,
+      "reasons": [
+        "inside requested window",
+        "preferred hours"
+      ]
+    },
+    {
+      "start_utc": "2026-12-02T04:45:00Z",
+      "end_utc": "2026-12-02T05:15:00Z",
+      "score": 4.3,
+      "reasons": [
+        "inside requested window",
+        "preferred hours"
+      ]
+    },
+    {
+      "start_utc": "2026-12-02T05:00:00Z",
+      "end_utc": "2026-12-02T05:30:00Z",
+      "score": 4.3,
+      "reasons": [
+        "inside requested window",
+        "preferred hours"
+      ]
+    }
+  ]
+}

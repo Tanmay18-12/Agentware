@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -205,7 +205,6 @@ class ReaderLLM:
 # --------------------------------------------------------------------------
 def stub_extract(envelope: EmailEnvelope, prefs: Prefs) -> MeetingIntent:
     body = envelope.body_text
-    lowered = body.lower()
     now_local = envelope.received_at.astimezone(resolve_tz(prefs.owner_tz, "UTC"))
     duration = _duration(body)
     tz_name = _timezone(body, prefs.owner_tz)

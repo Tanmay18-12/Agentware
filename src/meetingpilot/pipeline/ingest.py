@@ -20,10 +20,6 @@ MAX_BYTES = 512_000
 MAX_BODY = 8000
 
 ZERO_WIDTH = "\u200b\u200c\u200d\u2060\ufeff"
-HIDDEN_STYLE_RE = re.compile(
-    r"(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0|opacity\s*:\s*0|color\s*:\s*#fff(?:fff)?)",
-    re.IGNORECASE,
-)
 TAG_RE = re.compile(r"<[^>]+>")
 SCRIPT_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
 HIDDEN_BLOCK_RE = re.compile(
@@ -107,6 +103,12 @@ class Ingest:
 
     def from_dict(self, payload: dict[str, Any]) -> EmailEnvelope:
         return self._finalize(self._from_dict(payload, fallback_id="inline"))
+
+    def from_raw(self, raw: bytes) -> EmailEnvelope:
+        """Normalize an RFC 822 message fetched from a provider (IMAP, Mailpit, ...)."""
+        if len(raw) > MAX_BYTES:
+            raise MalformedMessage(f"message exceeds {MAX_BYTES} bytes")
+        return self._finalize(self._from_eml(raw))
 
     # -- parsers -------------------------------------------------------
     def _from_dict(self, payload: dict[str, Any], fallback_id: str) -> EmailEnvelope:

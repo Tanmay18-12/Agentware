@@ -21,25 +21,12 @@ from .pipeline.composer import (
 )
 from .pipeline.ingest import DuplicateMessage, Ingest, MalformedMessage
 from .pipeline.prefilter import prefilter
-from .pipeline.reader_llm import ReaderLLM, ReaderOutput, ReaderUnavailable
+from .pipeline.reader_llm import ReaderLLM, ReaderUnavailable
 from .pipeline.scheduler import SlotCandidate, compute_slots
-from .pipeline.screen import risk_flags, screen
+from .pipeline.screen import ScreenResult, risk_flags, screen
 from .pipeline.validator import validate_intent
 from .policy_gateway import AGENT_TAG, GatewayResult, PolicyGateway, ToolRuntime, new_action
 from .schemas import Decision, EmailEnvelope, MeetingIntent
-
-STAGES = (
-    (1, "ingest"),
-    (2, "prefilter"),
-    (3, "screen"),
-    (4, "reader_llm"),
-    (5, "validate"),
-    (6, "schedule"),
-    (7, "decide"),
-    (8, "act"),
-    (9, "verify"),
-    (10, "record"),
-)
 
 MINUTES_SAVED = {
     "BOOKED": 7.5,
@@ -54,6 +41,21 @@ MINUTES_SAVED = {
     "COMPENSATED": 0.0,
     "FAILED": 0.0,
 }
+
+# Identity, money and stranger risk stop the run before any clarification.
+IMMEDIATE_ESCALATION_RISKS = frozenset(
+    {
+        "unknown_external_domain",
+        "vip_sender",
+        "external_attendees",
+        "money_or_legal_wording",
+        "too_many_attendees",
+    }
+)
+# A window the reader could not pin down is a question for the sender, not a guess.
+AMBIGUITY_REASONS = frozenset(
+    {"time_unresolved", "no_date_time", "invalid_time", "timezone_missing"}
+)
 
 
 @dataclass
@@ -316,7 +318,7 @@ class Orchestrator:
         # ---- 6 schedule ----------------------------------------------
         self._enter(run_id, 6, "schedule")
         self.kill.check()
-        busy = await self._read_busy(run_id, envelope, intent)
+        busy = await self._read_busy(run_id, envelope)
         if busy is None:
             summary.outcome = "ESCALATED"
             summary.decision = "ESCALATE"
@@ -324,7 +326,27 @@ class Orchestrator:
             await self._escalate(run_id, envelope, summary, intent, [], ["calendar unavailable"])
             self._leave(run_id, 6, "schedule", "failed")
             return
-        slots = compute_slots(intent, self.prefs, busy, envelope.received_at)
+        resolution_issues: list[str] = []
+        slots = compute_slots(
+            intent, self.prefs, busy, envelope.received_at, issues=resolution_issues
+        )
+        ambiguous = [issue for issue in resolution_issues if "ambiguous" in issue]
+        if ambiguous:
+            # Never guess which side of a fall-back hour the requester meant.
+            summary.outcome = "NEEDS_CLARIFICATION"
+            summary.decision = "CLARIFY"
+            summary.reasons.extend(ambiguous)
+            self.bus.emit(run_id, "schedule", "ambiguous_time", {"issues": ambiguous})
+            await self._clarify(
+                run_id,
+                envelope,
+                intent,
+                summary,
+                "That time occurs twice because the clocks change. Which one did you mean? "
+                "Please reply with the time including an explicit UTC offset (e.g. 09:00+05:30).",
+            )
+            self._leave(run_id, 6, "schedule", "ambiguous")
+            return
         self._contexts[run_id] = {
             "envelope": envelope.model_dump(mode="json"),
             "intent": intent.model_dump(mode="json"),
@@ -346,7 +368,7 @@ class Orchestrator:
 
         # ---- 7 decide ------------------------------------------------
         self._enter(run_id, 7, "decide")
-        decision, booking_intent = self._decide(envelope, intent, slots, screening, summary)
+        decision = self._decide(envelope, intent, slots, screening)
         self._record_decision(run_id, summary, decision)
         summary.slots = [slot.model_dump(mode="json") for slot in decision.slots]
         self._leave(run_id, 7, "decide", decision.kind.lower())
@@ -382,32 +404,29 @@ class Orchestrator:
         envelope: EmailEnvelope,
         intent: MeetingIntent,
         slots: list[SlotCandidate],
-        screening: Any,
-        summary: RunSummary,
-    ) -> tuple[Decision, MeetingIntent]:
-        if getattr(screening, "spoof", False) and screening.injection_score < 0.5:
+        screening: ScreenResult,
+    ) -> Decision:
+        if screening.spoof and screening.injection_score < 0.5:
             return Decision(
                 kind="ESCALATE", reasons=["header identity mismatch (From / Reply-To / auth)"]
-            ), intent
+            )
 
         if intent.injection_suspected or screening.injection_score >= 0.5:
-            return Decision(kind="QUARANTINE", reasons=["injection suspected"]), intent
+            return Decision(kind="QUARANTINE", reasons=["injection suspected"])
 
         thread = self.store.get_thread_state(envelope.thread_id)
 
         if intent.kind == "not_meeting":
-            return Decision(kind="FILE", reasons=["not a meeting request"]), intent
+            return Decision(kind="FILE", reasons=["not a meeting request"])
 
         if intent.kind == "cancel":
             return Decision(
                 kind="ESCALATE",
                 reasons=["cancellation requested: the agent never deletes or edits events"],
-            ), intent
+            )
 
         if intent.kind == "reschedule" and not (thread and thread["status"] == "booked"):
-            return Decision(
-                kind="ESCALATE", reasons=["rescheduling requires human confirmation"]
-            ), intent
+            return Decision(kind="ESCALATE", reasons=["rescheduling requires human confirmation"])
 
         if intent.kind == "slot_selection":
             if thread and thread["status"] == "proposed":
@@ -415,12 +434,13 @@ class Orchestrator:
                 pending = thread["payload"].get("slots", [])
                 if chosen is not None and 0 <= chosen < len(pending):
                     slot = SlotCandidate.model_validate(pending[chosen])
-                    return (
-                        Decision(kind="BOOK", reasons=[f"thread owner picked option {chosen + 1}"], slots=[slot]),
-                        intent,
+                    return Decision(
+                        kind="BOOK",
+                        reasons=[f"thread owner picked option {chosen + 1}"],
+                        slots=[slot],
                     )
-                return Decision(kind="CLARIFY", reasons=["selected option not understood"]), intent
-            return Decision(kind="ESCALATE", reasons=["slot selection without a pending proposal"]), intent
+                return Decision(kind="CLARIFY", reasons=["selected option not understood"])
+            return Decision(kind="ESCALATE", reasons=["slot selection without a pending proposal"])
 
         if thread and thread["status"] == "proposed" and intent.kind == "meeting_request":
             # A reply in a proposed thread that is not a selection: keep negotiating, never double-book.
@@ -428,59 +448,36 @@ class Orchestrator:
                 kind="PROPOSE",
                 reasons=["thread already has a pending proposal"],
                 slots=slots[: self.prefs.max_proposals],
-            ), intent
-
-        risks = risk_flags(envelope, intent, self.prefs)
-        sender_risks = [
-            risk
-            for risk in risks
-            if risk
-            in {
-                "unknown_external_domain",
-                "vip_sender",
-                "external_attendees",
-                "money_or_legal_wording",
-                "too_many_attendees",
-            }
-        ]
-        if sender_risks:
-            return Decision(kind="ESCALATE", reasons=sender_risks, slots=slots[:1]), intent
-
-        clarify_ambiguity = {
-            "time_unresolved",
-            "no_date_time",
-            "invalid_time",
-            "timezone_missing",
-        }
-        if not intent.windows or clarify_ambiguity & set(intent.ambiguity):
-            return (
-                Decision(kind="CLARIFY", reasons=intent.ambiguity or ["no time window in the request"]),
-                intent,
             )
 
-        if risks:
-            return Decision(kind="ESCALATE", reasons=risks, slots=slots[:1]), intent
+        risks = risk_flags(envelope, intent, self.prefs)
+        blocking = [risk for risk in risks if risk in IMMEDIATE_ESCALATION_RISKS]
+        if blocking:
+            return Decision(kind="ESCALATE", reasons=blocking, slots=slots[:1])
+
+        if not intent.windows or AMBIGUITY_REASONS & set(intent.ambiguity):
+            return Decision(
+                kind="CLARIFY", reasons=intent.ambiguity or ["no time window in the request"]
+            )
+
+        soft = [risk for risk in risks if risk not in IMMEDIATE_ESCALATION_RISKS]
+        if soft:
+            return Decision(kind="ESCALATE", reasons=soft, slots=slots[:1])
 
         if not slots:
-            return Decision(kind="ESCALATE", reasons=["no conflict-free slot inside the policy"]), intent
+            return Decision(kind="ESCALATE", reasons=["no conflict-free slot inside the policy"])
 
         exact = self._exact_requested_start(intent)
         if exact is not None:
             if slots[0].start_utc == exact:
-                return Decision(kind="BOOK", reasons=["requested slot is free"], slots=[slots[0]]), intent
-            return (
-                Decision(
-                    kind="PROPOSE",
-                    reasons=["requested slot is unavailable"],
-                    slots=slots[: self.prefs.max_proposals],
-                ),
-                intent,
+                return Decision(kind="BOOK", reasons=["requested slot is free"], slots=[slots[0]])
+            return Decision(
+                kind="PROPOSE",
+                reasons=["requested slot is unavailable"],
+                slots=slots[: self.prefs.max_proposals],
             )
 
-        if "timezone_missing" in intent.ambiguity:
-            return Decision(kind="CLARIFY", reasons=["timezone missing"]), intent
-
-        return Decision(kind="BOOK", reasons=["conflict-free slot found"], slots=[slots[0]]), intent
+        return Decision(kind="BOOK", reasons=["conflict-free slot found"], slots=[slots[0]])
 
     def _exact_requested_start(self, intent: MeetingIntent) -> datetime | None:
         for window in intent.windows:
@@ -772,7 +769,7 @@ class Orchestrator:
         )
 
     async def _read_busy(
-        self, run_id: str, envelope: EmailEnvelope, intent: MeetingIntent
+        self, run_id: str, envelope: EmailEnvelope
     ) -> list[dict[str, Any]] | None:
         now = envelope.received_at
         horizon = now + timedelta(days=self.prefs.horizon_days)

@@ -1,0 +1,27 @@
+{
+  "message_id": "<01_valid_request-20261127@mail.example.com>",
+  "intent": {
+    "kind": "meeting_request",
+    "confidence": 0.92,
+    "title": "Q1 roadmap review",
+    "duration_min": 45,
+    "windows": [
+      {
+        "start_iso": "2026-12-04T14:00:00+05:30",
+        "end_iso": "2026-12-04T14:45:00+05:30",
+        "raw_phrase": "Could we meet next Friday at 14:00 IST for 45 minutes to review the Q1 roadmap?",
+        "tz": "Asia/Kolkata",
+        "flexibility": "exact"
+      }
+    ],
+    "attendees": [],
+    "location_pref": null,
+    "ambiguity": [],
+    "injection_suspected": false,
+    "rationale": "stub extraction: kind=meeting_request, phrase='Could we meet next Friday at 14:00 IST for 45 minutes to review the Q1 roadmap?', tz=IST, duration=45m",
+    "selected_slot": null
+  },
+  "model": "cassette:stub-recording",
+  "tokens": 0,
+  "cost_usd": 0.0
+}

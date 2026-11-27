@@ -88,7 +88,7 @@
   </section>
 
   <section class="card" style="grid-column:1/-1">
-    <h2>Mock world inspector</h2>
+    <h2 id="world-title">World inspector</h2>
     <div class="tabs" id="tabs">
       <button data-tab="samples" class="active">Samples</button>
       <button data-tab="inbox">Inbox</button>
@@ -131,7 +131,10 @@ function paintHeader(s){
   $("m-runs").textContent = t.runs ?? 0;
   $("m-min").textContent = (t.minutes_saved ?? 0).toFixed(1);
   $("m-int").textContent = t.human_interventions ?? 0;
-  if (s.mode) $("mode").textContent = `mock=${s.mode.mock_mode ? 1 : 0} · llm=${s.mode.llm_mode}`;
+  if (s.mode) {
+    $("mode").textContent = `mock=${s.mode.mock_mode ? 1 : 0} · llm=${s.mode.llm_mode} · mail=${s.mode.mail_provider} · cal=${s.mode.calendar_provider}`;
+    $("world-title").textContent = `${s.mode.mail_provider} mail · ${s.mode.calendar_provider} calendar`;
+  }
   state.world = s;
   if (s.approvals) paintApprovals(s.approvals);
   paintWorld();

@@ -7,7 +7,6 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import pytest
 from hypothesis import given, settings as hyp_settings, strategies as st
 
 from helpers import make_world

@@ -23,10 +23,7 @@ Every verdict emits a `PolicyDecision` event with rule IDs.
 | P8 dry run | `policy_gateway.py:217` | `::test_dry_run_suppresses_the_effect` | — |
 | P10 violations logged, risk raised | `policy_gateway.py:156` | `::test_unregistered_tool_is_blocked_and_logged` | `inj_07_forward_every` |
 
-**Output guard** (`pipeline/composer.py:50`): length cap, no email address other than the verified
-sender and owner, URL allowlist (`https://meet.example.com/…`), secret/token patterns
-(`sk-`, `Bearer`, `ghp_`, `AKIA`), injection-echo rejection, no third-party event titles, disclosure
-footer, and `Auto-Submitted: auto-replied` headers.
+**Output guard** (`pipeline/compoSAFETY.md — the four safety features, each with a mechanism, a test and a trap caseser.py:50`): length cap, no email address other than the verified sender and owner, URL allowlist (`https://meet.example.com/…`), secret/token patterns (`sk-`, `Bearer`, `ghp_`, `AKIA`), injection-echo rejection, no third-party event titles, disclosure footer, and `Auto-Submitted: auto-replied` headers.
 
 **Property test.** `test_policy_gateway.py::test_gateway_invariants` throws randomized
 `ActionRequest`s (tool × stage × recipient × cc) at the gateway and asserts: unregistered tools are

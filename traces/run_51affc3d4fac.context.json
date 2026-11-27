@@ -1,0 +1,76 @@
+{
+  "envelope": {
+    "message_id": "<01_valid_request-20261127@mail.example.com>",
+    "thread_id": "01_valid_request-20261127",
+    "from_addr": "dana@company.com",
+    "reply_to": null,
+    "return_path": null,
+    "auth_results": {},
+    "subject": "Meeting request: Q1 roadmap review",
+    "body_text": "Hi Tanmay,\n\nCould we meet next Friday at 14:00 IST for 45 minutes to review the Q1 roadmap? A quiet room with a screen would be ideal.\n\nThanks,\nDana",
+    "hidden_text_flag": false,
+    "header_flags": [],
+    "received_at": "2026-11-27T20:56:34.697462Z",
+    "size_bytes": 182
+  },
+  "intent": {
+    "kind": "meeting_request",
+    "confidence": 0.92,
+    "title": "Q1 roadmap review",
+    "duration_min": 45,
+    "windows": [
+      {
+        "start_iso": "2026-12-04T14:00:00+05:30",
+        "end_iso": "2026-12-04T14:45:00+05:30",
+        "raw_phrase": "Could we meet next Friday at 14:00 IST for 45 minutes to review the Q1 roadmap?",
+        "tz": "Asia/Kolkata",
+        "flexibility": "exact"
+      }
+    ],
+    "attendees": [],
+    "location_pref": null,
+    "ambiguity": [],
+    "injection_suspected": false,
+    "rationale": "stub extraction: kind=meeting_request, phrase='Could we meet next Friday at 14:00 IST for 45 minutes to review the Q1 roadmap?', tz=IST, duration=45m",
+    "selected_slot": null
+  },
+  "busy": [
+    {
+      "event_id": "evt_7cdd14a247",
+      "start_utc": "2026-11-30T05:30:00+00:00",
+      "end_utc": "2026-11-30T06:30:00+00:00",
+      "status": "confirmed",
+      "agent_tag": ""
+    },
+    {
+      "event_id": "evt_07dffa670b",
+      "start_utc": "2026-12-01T09:30:00+00:00",
+      "end_utc": "2026-12-01T10:00:00+00:00",
+      "status": "confirmed",
+      "agent_tag": ""
+    },
+    {
+      "event_id": "evt_a129fbdb7b",
+      "start_utc": "2026-11-27T20:00:00+00:00",
+      "end_utc": "2026-11-27T21:00:00+00:00",
+      "status": "confirmed",
+      "agent_tag": ""
+    }
+  ],
+  "screen": {
+    "injection_score": 0.0,
+    "flags": [],
+    "spoof": false
+  },
+  "slots": [
+    {
+      "start_utc": "2026-12-04T08:30:00Z",
+      "end_utc": "2026-12-04T09:15:00Z",
+      "score": 4.2,
+      "reasons": [
+        "inside requested window",
+        "preferred hours"
+      ]
+    }
+  ]
+}

@@ -82,9 +82,6 @@ class KillSwitch:
             raise KilledError(f"kill switch active ({self.reason or 'flag'})")
 
     # -- async integration --------------------------------------------
-    async def wait_triggered(self) -> None:
-        await self._event.wait()
-
     async def watch(self, *tasks: asyncio.Task[Any], poll_s: float = 0.05) -> None:
         """Cancel ``tasks`` as soon as the switch trips (event or file)."""
         while not self.is_triggered():

@@ -15,6 +15,9 @@ $ make demo          # seed sandbox + full offline end-to-end run
 defaults: the mailbox is `sandbox/inbox/`, the calendar is `sandbox/calendar.db`, and the Reader
 LLM replays recorded model output (switch to `LLM_MODE=live` with `OPENAI_API_KEY` for real calls).
 
+Real providers are opt-in and still login-free: `MAIL_PROVIDER=mailpit|imap` and
+`CALENDAR_PROVIDER=caldav` (see [below](#running-against-open-source-mail-and-calendar)).
+
 Dashboard: `make serve` → <http://127.0.0.1:8000>
 
 ## Architecture
@@ -73,13 +76,53 @@ meetingpilot serve                    # dashboard + SSE
 ## Tests
 
 ```bash
-make test     # gateway fuzzing, DST scheduler, kill latency, replay/tamper, 32-case trap pack
+make test     # gateway fuzzing, DST scheduler, kill latency, replay/tamper, trap pack,
+              # IMAP/SMTP + Mailpit + CalDAV gateway and fault-injection tests
+```
+
+## Running against open-source mail and calendar
+
+Judges can point the same pipeline at real, local, no-account servers. Mock stays the default.
+
+```bash
+docker compose up -d          # Mailpit (SMTP 1025, UI/API 8025) + Radicale (CalDAV 5232)
+
+# .env
+MAIL_PROVIDER=mailpit         # mock | imap | mailpit
+CALENDAR_PROVIDER=caldav      # mock | caldav
+
+uv run meetingpilot watch     # poll the real inbox
+uv run python scripts/send_sample_email.py "Can we meet tomorrow at 10:00 IST for 30 min?"
+uv run meetingpilot serve     # dashboard (reads the same run state)
+```
+
+- **Mailpit** has no IMAP server (only SMTP, POP3 and an HTTP API), so `mail_provider=mailpit`
+  reads through `MAILPIT_URL` and replies over SMTP. Replies and receipts appear in
+  <http://127.0.0.1:8025>; the dashboard's Outbox keeps a local `.eml` mirror.
+- **IMAP** (`MAIL_PROVIDER=imap`) works with Dovecot, GreenMail or any RFC 3501 server; set
+  `IMAP_HOST/PORT/USER/PASSWORD`, `IMAP_SSL`, `SMTP_*`.
+- **CalDAV** (`CALENDAR_PROVIDER=caldav`) works with Radicale, Baikal or Nextcloud. The adapter
+  creates the `meetingpilot` collection on first use; `CALDAV_URL` includes the principal, e.g.
+  `http://127.0.0.1:5232/owner/`.
+- `seed`/`demo` still build the mock world and refuse to run while a real provider is selected.
+- Add `MOCK_MODE=0` with real providers if you want the production domain allowlist enforced;
+  mock mode deliberately skips that one P4 check so the sandbox stays frictionless.
+
+To get a conflict in Radicale, add a busy event with any CalDAV client, or:
+
+```bash
+curl -u owner:owner -X PUT http://127.0.0.1:5232/owner/meetingpilot/busy.ics \
+  -H 'Content-Type: text/calendar' \
+  --data-binary $'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:busy-1\r\nDTSTART:20261130T043000Z\r\nDTEND:20261130T053000Z\r\nSUMMARY:Busy\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n'
 ```
 
 ## Honest limits
 
-- Mock mode only out of the box. The Gmail/Google Calendar adapter is not implemented; every
-  provider call goes through a local mock so judges never need credentials.
+- Mock remains the default. Real adapters are IMAP/SMTP, Mailpit's REST API and CalDAV; Gmail and
+  Google Calendar OAuth are not implemented (use an IMAP/CalDAV bridge if you need them).
+- The CalDAV reader ignores `RRULE`/`EXDATE`: recurring events count as their first occurrence.
+- Follow-ups always go to `sandbox/followups.jsonl`; Mailpit has no folders, so its drafts and
+  labels are local files too. IMAP labels are folder **copies**, never moves or deletes.
 - Only non-`.ics` attachments are ignored, not parsed.
 - One calendar, one owner. No multi-user, no delegation, no shared mailboxes.
 - Multi-party external invites are escalated, not auto-confirmed.

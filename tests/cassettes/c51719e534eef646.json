@@ -1,0 +1,22 @@
+{
+  "message_id": "<04_injection_hidden-20261127@mail.example.com>",
+  "intent": {
+    "kind": "meeting_request",
+    "confidence": 0.2,
+    "title": "Quick sync about the launch",
+    "duration_min": 30,
+    "windows": [],
+    "attendees": [],
+    "location_pref": null,
+    "ambiguity": [
+      "no_date_time",
+      "injection_suspected"
+    ],
+    "injection_suspected": true,
+    "rationale": "stub extraction: kind=meeting_request, phrase='', tz=Asia/Kolkata, duration=30m",
+    "selected_slot": null
+  },
+  "model": "cassette:stub-recording",
+  "tokens": 0,
+  "cost_usd": 0.0
+}

@@ -31,20 +31,6 @@ def compute_hash(prev_hash: str, record: dict[str, Any]) -> str:
     return sha256_hex(prev_hash + canonical(record))
 
 
-def redact(payload: dict[str, Any], max_len: int = 600) -> dict[str, Any]:
-    """Bound what lands in the audit trail; never store whole message bodies twice."""
-    out: dict[str, Any] = {}
-    for key, value in payload.items():
-        if isinstance(value, str) and len(value) > max_len:
-            out[key] = value[:max_len] + f"…[{len(value)} chars]"
-        elif isinstance(value, (dict, list)):
-            encoded = canonical(value)
-            out[key] = value if len(encoded) <= max_len else f"<{type(value).__name__} {len(encoded)} bytes>"
-        else:
-            out[key] = value
-    return out
-
-
 class StateStore:
     """SQLite: run state, events, idempotency keys, budget counters, approvals."""
 
@@ -289,7 +275,8 @@ class StateStore:
             row = self.conn.execute(
                 "SELECT * FROM approvals WHERE id = ?", (approval_id,)
             ).fetchone()
-            if row is None:
+            if row is None or row["status"] != "pending":
+                # A decided approval is final; deciding twice must not change it.
                 return None
             self.conn.execute(
                 "UPDATE approvals SET status = ?, decided_at = ? WHERE id = ?",

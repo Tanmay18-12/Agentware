@@ -13,8 +13,8 @@ from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
 from ..config import Prefs
-from ..schemas import MeetingIntent, SlotCandidate, TimeWindow
-from .validator import local_is_nonexistent, parse_hhmm, resolve_tz
+from ..schemas import MeetingIntent, SlotCandidate
+from .validator import local_is_ambiguous, local_is_nonexistent, parse_hhmm, resolve_tz
 
 WEEKDAYS = {
     "monday": 0,
@@ -182,6 +182,12 @@ def resolve_windows(
         if start is None or end is None:
             issues.append(f"could not resolve window {window.raw_phrase or window.start_iso!r}")
             continue
+        if local_is_ambiguous(start):
+            # A phrase like "Nov 1 at 01:30" means two possible instants; the caller must clarify.
+            issues.append(
+                f"{window.raw_phrase or window.start_iso} is ambiguous in {tz} "
+                "(DST fall-back): please use an explicit UTC offset"
+            )
         regions.append(Interval(start, end))
     return regions, issues
 
@@ -307,13 +313,17 @@ def compute_slots(
     busy: Iterable[Any],
     now_utc: datetime | None = None,
     limit: int | None = None,
+    issues: list[str] | None = None,
 ) -> list[SlotCandidate]:
+    """Return scored slots; pass ``issues`` to receive window-resolution warnings."""
     now = to_utc(now_utc or datetime.now(timezone.utc))
     tz = ZoneInfo(prefs.owner_tz)
     duration = timedelta(minutes=intent.duration_min or 30)
     grid = max(5, prefs.grid_min)
 
-    regions, _issues = resolve_windows(intent, prefs, now)
+    regions, resolution_issues = resolve_windows(intent, prefs, now)
+    if issues is not None:
+        issues.extend(resolution_issues)
     default = _default_regions(now, prefs, tz, intent)
 
     busy_intervals = [as_interval(item) for item in busy]
@@ -363,16 +373,32 @@ def compute_slots(
         return found
 
     candidates = _search(regions or default)
-    if not candidates and regions:
-        # The requested window is fully booked: propose alternatives on following days.
-        candidates = _search(default)
+    if candidates or not regions:
+        return _rank(candidates)[: (limit or prefs.max_proposals)]
 
+    # The requested window is fully booked: same-day later slots outrank following days.
+    requested_day = regions[0].start.astimezone(tz).date()
+    same_day: list[SlotCandidate] = []
+    block = work_block(requested_day, prefs, tz)
+    if block is not None:
+        later = Interval(max(block.start, regions[0].start), block.end)
+        if later.end > later.start:
+            same_day = _rank(_search([later]))
+    following_days = [
+        candidate
+        for candidate in _search(default)
+        if candidate.start_utc.astimezone(tz).date() != requested_day
+    ]
+    return (same_day + _rank(following_days))[: (limit or prefs.max_proposals)]
+
+
+def _rank(candidates: Iterable[SlotCandidate]) -> list[SlotCandidate]:
+    """Deduplicate by start (keeping the best score), then order by score and time."""
     unique: dict[datetime, SlotCandidate] = {}
     for candidate in candidates:
         if candidate.start_utc not in unique or candidate.score > unique[candidate.start_utc].score:
             unique[candidate.start_utc] = candidate
-    ordered = sorted(unique.values(), key=lambda item: (-item.score, item.start_utc))
-    return ordered[: (limit or prefs.max_proposals)]
+    return sorted(unique.values(), key=lambda item: (-item.score, item.start_utc))
 
 
 def _default_regions(now: datetime, prefs: Prefs, tz: ZoneInfo, intent: MeetingIntent) -> list[Interval]:
@@ -442,13 +468,3 @@ def _score(
     days_away = (local.date() - now.astimezone(tz).date()).days
     score -= 0.05 * max(0, days_away)
     return score, reasons
-
-
-def verify_no_overlap(start: datetime, end: datetime, busy: Iterable[Any], exclude_event_id: str | None = None) -> bool:
-    target = Interval(start, end)
-    for item in busy:
-        if isinstance(item, dict) and exclude_event_id and item.get("event_id") == exclude_event_id:
-            continue
-        if overlaps(target, as_interval(item)):
-            return False
-    return True

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable
 
 from ..config import Prefs
 from ..schemas import EmailEnvelope, MeetingIntent
@@ -137,11 +136,3 @@ def risk_flags(envelope: EmailEnvelope, intent: MeetingIntent, prefs: Prefs) -> 
     if intent.confidence < 0.75:
         risks.append("low_confidence")
     return risks
-
-
-def quoted_regions(body: str) -> Iterable[str]:
-    """Lines that look like a quoted reply (used to keep extraction on the new text)."""
-    for line in body.splitlines():
-        if line.strip().startswith(">"):
-            continue
-        yield line

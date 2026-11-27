@@ -1,0 +1,13 @@
+[server]
+hosts = 0.0.0.0:5232
+
+# Local judging only: any username/password is accepted (the client still sends one,
+# so owner_only rights resolve to /owner/).
+[auth]
+type = none
+
+[storage]
+filesystem_folder = /var/lib/radicale/collections
+
+[rights]
+type = owner_only

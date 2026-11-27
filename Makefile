@@ -1,4 +1,4 @@
-.PHONY: setup seed demo test lint clean serve watch
+.PHONY: setup seed demo test lint clean serve watch infra-up infra-down infra-logs
 
 setup:            ## create the venv and install deps
 	uv sync --extra dev
@@ -20,6 +20,15 @@ watch:            ## poll sandbox/inbox forever
 
 lint:             ## compile check (no external linter required)
 	uv run python -m compileall -q src tests scripts
+
+infra-up:         ## Mailpit + Radicale for MAIL_PROVIDER=mailpit CALENDAR_PROVIDER=caldav
+	docker compose up -d
+
+infra-down:
+	docker compose down
+
+infra-logs:
+	docker compose logs -f
 
 clean:
 	rm -rf sandbox/*.db sandbox/outbox/* sandbox/drafts/* traces/*.jsonl .kill .pytest_cache

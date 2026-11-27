@@ -173,6 +173,36 @@ class Settings:
     config_path: Path = field(default_factory=lambda: Path("config/prefs.yaml"))
     host: str = "127.0.0.1"
     port: int = 8000
+    mail_provider: str = "mock"
+    calendar_provider: str = "mock"
+    # IMAP / SMTP (mail_provider=imap)
+    imap_host: str = "127.0.0.1"
+    imap_port: int = 1143
+    imap_user: str = "meetingpilot"
+    imap_password: str = "meetingpilot"
+    imap_ssl: bool = False
+    imap_mailbox: str = "INBOX"
+    imap_drafts_mailbox: str = "Drafts"
+    smtp_host: str = "127.0.0.1"
+    smtp_port: int = 1025
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = False
+    smtp_ssl: bool = False
+    smtp_timeout_s: float = 10.0
+    mail_from: str = ""
+    # Mailpit HTTP API (mail_provider=mailpit)
+    mailpit_url: str = "http://127.0.0.1:8025"
+    mailpit_user: str = ""
+    mailpit_password: str = ""
+    mailpit_timeout_s: float = 10.0
+    # CalDAV (calendar_provider=caldav)
+    caldav_url: str = "http://127.0.0.1:5232/owner/"
+    caldav_user: str = "owner"
+    caldav_password: str = "owner"
+    caldav_calendar: str = "meetingpilot"
+    caldav_verify_tls: bool = True
+    caldav_timeout_s: float = 10.0
     prefs: Prefs = field(default_factory=Prefs)
 
     @classmethod
@@ -199,6 +229,33 @@ class Settings:
             config_path=config_path,
             host=str(merged.get("HOST", "127.0.0.1")),
             port=int(merged.get("PORT", "8000")),
+            mail_provider=str(merged.get("MAIL_PROVIDER", "mock")).strip().lower(),
+            calendar_provider=str(merged.get("CALENDAR_PROVIDER", "mock")).strip().lower(),
+            imap_host=str(merged.get("IMAP_HOST", "127.0.0.1")),
+            imap_port=int(merged.get("IMAP_PORT", "1143")),
+            imap_user=str(merged.get("IMAP_USER", "meetingpilot")),
+            imap_password=str(merged.get("IMAP_PASSWORD", "meetingpilot")),
+            imap_ssl=flag("IMAP_SSL", "0"),
+            imap_mailbox=str(merged.get("IMAP_MAILBOX", "INBOX")),
+            imap_drafts_mailbox=str(merged.get("IMAP_DRAFTS_MAILBOX", "Drafts")),
+            smtp_host=str(merged.get("SMTP_HOST", "127.0.0.1")),
+            smtp_port=int(merged.get("SMTP_PORT", "1025")),
+            smtp_user=str(merged.get("SMTP_USER", "")),
+            smtp_password=str(merged.get("SMTP_PASSWORD", "")),
+            smtp_starttls=flag("SMTP_STARTTLS", "0"),
+            smtp_ssl=flag("SMTP_SSL", "0"),
+            smtp_timeout_s=float(merged.get("SMTP_TIMEOUT_S", "10")),
+            mail_from=str(merged.get("MAIL_FROM", "")),
+            mailpit_url=str(merged.get("MAILPIT_URL", "http://127.0.0.1:8025")),
+            mailpit_user=str(merged.get("MAILPIT_USER", "")),
+            mailpit_password=str(merged.get("MAILPIT_PASSWORD", "")),
+            mailpit_timeout_s=float(merged.get("MAILPIT_TIMEOUT_S", "10")),
+            caldav_url=str(merged.get("CALDAV_URL", "http://127.0.0.1:5232/owner/")),
+            caldav_user=str(merged.get("CALDAV_USER", "owner")),
+            caldav_password=str(merged.get("CALDAV_PASSWORD", "owner")),
+            caldav_calendar=str(merged.get("CALDAV_CALENDAR", "meetingpilot")),
+            caldav_verify_tls=flag("CALDAV_VERIFY_TLS", "1"),
+            caldav_timeout_s=float(merged.get("CALDAV_TIMEOUT_S", "10")),
             prefs=load_prefs(config_path),
         )
         for key, value in overrides.items():

@@ -10,9 +10,12 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
+from .adapters.base import CalendarProvider, MailProvider
+from .adapters.caldav_calendar import CalDavCalendar
+from .adapters.imap_mail import ImapMail
+from .adapters.mailpit_mail import MailpitMail
 from .adapters.mock_calendar import MockCalendar
 from .adapters.mock_mail import MockMail
 from .config import Settings
@@ -20,6 +23,9 @@ from .demo_world import reset_runtime, seed
 from .event_bus import EventBus
 from .kill_switch import KillSwitch
 from .orchestrator import Orchestrator, RunSummary
+from .pipeline.ingest import DuplicateMessage, Ingest, MalformedMessage
+from .pipeline.scheduler import compute_slots
+from .pipeline.screen import ScreenResult
 from .schemas import EmailEnvelope, MeetingIntent
 
 
@@ -27,8 +33,8 @@ from .schemas import EmailEnvelope, MeetingIntent
 class Services:
     settings: Settings
     bus: EventBus
-    mail: MockMail
-    calendar: MockCalendar
+    mail: MailProvider
+    calendar: CalendarProvider
     kill: KillSwitch
     orchestrator: Orchestrator
 
@@ -37,22 +43,57 @@ def build_services(settings: Settings | None = None) -> Services:
     settings = settings or Settings.from_env()
     settings.ensure_dirs()
     bus = EventBus(settings)
-    mail = MockMail(settings)
-    calendar = MockCalendar(settings)
+    mail = build_mail(settings)
+    calendar = build_calendar(settings)
     kill = KillSwitch(settings.kill_file)
     orchestrator = Orchestrator(settings, bus, mail, calendar, kill)
     return Services(settings, bus, mail, calendar, kill, orchestrator)
+
+
+def build_mail(settings: Settings) -> MailProvider:
+    provider = settings.mail_provider
+    if provider == "mock":
+        return MockMail(settings)
+    if provider == "imap":
+        return ImapMail(settings)
+    if provider == "mailpit":
+        return MailpitMail(settings)
+    raise ValueError(f"unknown MAIL_PROVIDER {provider!r} (expected mock|imap|mailpit)")
+
+
+def build_calendar(settings: Settings) -> CalendarProvider:
+    provider = settings.calendar_provider
+    if provider == "mock":
+        return MockCalendar(settings)
+    if provider == "caldav":
+        return CalDavCalendar(settings)
+    raise ValueError(f"unknown CALENDAR_PROVIDER {provider!r} (expected mock|caldav)")
+
+
+def _require_mock_providers(settings: Settings) -> int | None:
+    if settings.mail_provider != "mock" or settings.calendar_provider != "mock":
+        print(
+            "seed/demo build the offline mock world; unset MAIL_PROVIDER/CALENDAR_PROVIDER "
+            "or use inject/watch/serve against the real providers",
+            file=sys.stderr,
+        )
+        return 2
+    return None
 
 
 # --------------------------------------------------------------------------
 # commands
 # --------------------------------------------------------------------------
 def cmd_seed(args: argparse.Namespace, settings: Settings) -> int:
+    if _require_mock_providers(settings) is not None:
+        return 2
     print(json.dumps(seed(settings), indent=2))
     return 0
 
 
 def cmd_demo(args: argparse.Namespace, settings: Settings) -> int:
+    if _require_mock_providers(settings) is not None:
+        return 2
     seed(settings)
     reset_runtime(settings)
     if settings.kill_file.exists():
@@ -134,6 +175,8 @@ def cmd_inject(args: argparse.Namespace, settings: Settings) -> int:
 
 def cmd_watch(args: argparse.Namespace, settings: Settings) -> int:
     services = build_services(settings)
+    if settings.mail_provider != "mock":
+        return _watch_provider(args, services)
     processed = settings.sandbox_dir / "processed"
     processed.mkdir(parents=True, exist_ok=True)
     print(f"watching {settings.inbox_dir} (ctrl-c to stop)")
@@ -148,6 +191,34 @@ def cmd_watch(args: argparse.Namespace, settings: Settings) -> int:
                     f"run={summary.run_id}"
                 )
                 shutil.move(str(path), str(processed / path.name))
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print("\nstopped")
+    return 0
+
+
+def _watch_provider(args: argparse.Namespace, services: Services) -> int:
+    settings = services.settings
+    ingest = Ingest(settings, services.bus.store)
+    print(f"polling {settings.mail_provider} every {args.interval}s (ctrl-c to stop)")
+    try:
+        while True:
+            for item in asyncio.run(services.mail.list_new(limit=10)):  # type: ignore[attr-defined]
+                record = asyncio.run(services.mail.read(item["id"]))  # type: ignore[attr-defined]
+                if not record:
+                    continue
+                try:
+                    envelope = ingest.from_raw(str(record["raw"]).encode())
+                except DuplicateMessage:
+                    continue
+                except (MalformedMessage, ValueError) as error:
+                    print(f"skipping {item['id']}: {error}", file=sys.stderr)
+                    continue
+                summary = asyncio.run(services.orchestrator.handle(envelope))
+                print(
+                    f"{item['id']:<16} → {summary.outcome:<18} decision={summary.decision} "
+                    f"run={summary.run_id}"
+                )
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\nstopped")
@@ -201,16 +272,14 @@ def cmd_replay(args: argparse.Namespace, settings: Settings) -> int:
         return 1
     envelope = EmailEnvelope.model_validate(context["envelope"])
     intent = MeetingIntent.model_validate(context["intent"])
-    from .pipeline.scheduler import compute_slots
-
     slots = compute_slots(intent, settings.prefs, context["busy"], envelope.received_at)
-    screening = SimpleNamespace(
+    screening = ScreenResult(
         injection_score=context["screen"]["injection_score"],
         flags=tuple(context["screen"]["flags"]),
+        quarantine=False,
         spoof=bool(context["screen"].get("spoof", False)),
     )
-    summary = RunSummary(run_id=args.run_id, message_id=envelope.message_id, outcome="")
-    decision, _ = services.orchestrator._decide(envelope, intent, slots, screening, summary)
+    decision = services.orchestrator._decide(envelope, intent, slots, screening)
     expected = recorded[0]["payload"]["kind"]
     matches = decision.kind == expected
     print(

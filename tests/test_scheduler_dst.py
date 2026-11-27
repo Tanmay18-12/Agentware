@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
-from helpers import base_prefs, make_world
+from helpers import base_prefs, make_world, next_business_day
 from meetingpilot.pipeline.scheduler import (
     Interval,
     compute_slots,
@@ -14,9 +14,15 @@ from meetingpilot.pipeline.scheduler import (
     subtract,
     work_block,
 )
-from meetingpilot.pipeline.validator import local_is_ambiguous, local_is_nonexistent, resolve_tz
+from meetingpilot.pipeline.reader_llm import ReaderOutput
+from meetingpilot.pipeline.validator import (
+    local_is_ambiguous,
+    local_is_nonexistent,
+    resolve_tz,
+    validate_intent,
+)
 from meetingpilot.policy_gateway import new_action, ToolRuntime
-from meetingpilot.schemas import EmailEnvelope, MeetingIntent, TimeWindow
+from meetingpilot.schemas import MeetingIntent, TimeWindow
 
 from zoneinfo import ZoneInfo
 
@@ -212,3 +218,104 @@ def test_interval_math():
     assert overlaps(a, b)
     pieces = subtract([a], [b])
     assert len(pieces) == 1 and pieces[0].end.hour == 11
+
+
+def test_fall_back_iso_timestamp_is_a_hard_fail():
+    prefs = base_prefs(owner_tz="America/New_York")
+    intent = intent_with("2027-11-07T01:30:00", duration=30, tz="America/New_York")
+    result = validate_intent(intent, prefs, now=datetime(2026, 10, 20, tzinfo=timezone.utc))
+    assert result.hard_fail is True
+    assert result.ok is False
+    assert any("ambiguous" in issue for issue in result.issues)
+
+
+def test_fall_back_phrase_is_surfaced_as_an_issue():
+    prefs = base_prefs(
+        owner_tz="America/New_York", work_start="09:00", work_end="17:00",
+        buffer_before=0, buffer_after=0, min_notice_hours=0, protected=(),
+        horizon_days=400, pref_start="09:00", pref_end="17:00",
+    )
+    intent = MeetingIntent(
+        kind="meeting_request", confidence=0.95, title="Fall back", duration_min=30,
+        windows=[TimeWindow(raw_phrase="2027-11-07 at 01:30", tz="America/New_York", flexibility="exact")],
+    )
+    issues: list[str] = []
+    slots = compute_slots(
+        intent, prefs, [], now_utc=datetime(2026, 10, 20, tzinfo=timezone.utc), issues=issues
+    )
+    assert any("ambiguous" in issue for issue in issues)
+    assert slots  # resolution still returns candidates; the orchestrator refuses to act on them
+
+
+def test_conflict_offers_same_day_later_slots_first():
+    prefs = base_prefs(
+        owner_tz="UTC", work_start="09:00", work_end="17:00", buffer_before=0, buffer_after=0,
+        min_notice_hours=0, protected=(), pref_start="09:00", pref_end="17:00", grid_min=15,
+    )
+    busy = [{"start_utc": "2026-12-02T10:00:00+00:00", "end_utc": "2026-12-02T10:30:00+00:00"}]
+    intent = intent_with("2026-12-02T10:00:00+00:00", duration=30)
+    slots = compute_slots(
+        intent, prefs, busy, now_utc=datetime(2026, 12, 1, 12, tzinfo=timezone.utc), limit=3
+    )
+    assert slots
+    assert slots[0].start_utc > datetime(2026, 12, 2, 10, 30, tzinfo=timezone.utc)
+    assert all(slot.start_utc.date() == date(2026, 12, 2) for slot in slots)
+
+
+def test_conflict_run_proposes_same_day_slots(tmp_path):
+    prefs = base_prefs(min_notice_hours=0)
+    tz = ZoneInfo(prefs.owner_tz)
+    day = next_business_day(tz=tz).date()
+    busy_start = datetime.combine(day, time(10, 0), tzinfo=tz)
+    busy_end = busy_start + timedelta(minutes=30)
+    world = make_world(
+        tmp_path / "propose",
+        prefs=prefs,
+        busy=[(busy_start.isoformat(), busy_end.isoformat())],
+    )
+    intent = MeetingIntent(
+        kind="meeting_request", confidence=0.95, title="Conflict", duration_min=30,
+        windows=[TimeWindow(start_iso=busy_start.isoformat(), tz=prefs.owner_tz, flexibility="exact")],
+    )
+
+    class FixedReader:
+        async def read(self, envelope):
+            return ReaderOutput(intent=intent, mode="test")
+
+    world.orchestrator.reader = FixedReader()
+    envelope = world.ingest(
+        {"from": "dana@company.com", "subject": "Conflict", "body": "That time is taken"}
+    )
+    summary = asyncio.run(world.orchestrator.handle(envelope))
+    assert summary.decision == "PROPOSE"
+    assert len(summary.slots) == prefs.max_proposals
+    local_starts = [
+        datetime.fromisoformat(slot["start_utc"]).astimezone(tz) for slot in summary.slots
+    ]
+    assert all(local.date() == day for local in local_starts)
+    assert all(local > busy_start for local in local_starts)
+
+
+def test_ambiguous_request_runs_clarify_instead_of_booking(tmp_path):
+    prefs = base_prefs(
+        owner_tz="America/New_York", buffer_before=0, buffer_after=0,
+        min_notice_hours=0, protected=(), horizon_days=400,
+    )
+    world = make_world(tmp_path / "ambiguous", llm_mode="stub", prefs=prefs, busy=[])
+    intent = MeetingIntent(
+        kind="meeting_request", confidence=0.95, title="Fall back", duration_min=30,
+        windows=[TimeWindow(raw_phrase="2027-11-07 at 01:30", tz="America/New_York", flexibility="exact")],
+    )
+
+    class FixedReader:
+        async def read(self, envelope):
+            return ReaderOutput(intent=intent, mode="test")
+
+    world.orchestrator.reader = FixedReader()
+    envelope = world.ingest(
+        {"from": "dana@company.com", "subject": "Ambiguous time", "body": "2027-11-07 at 01:30"}
+    )
+    summary = asyncio.run(world.orchestrator.handle(envelope))
+    assert summary.outcome == "NEEDS_CLARIFICATION"
+    assert any("ambiguous" in reason for reason in summary.reasons)
+    assert asyncio.run(world.calendar.list_events()) == []

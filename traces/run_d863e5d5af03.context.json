@@ -1,0 +1,56 @@
+{
+  "envelope": {
+    "message_id": "179581382525.179542.11498184204480464522@dana.test",
+    "thread_id": "179581382525.179542.11498184204480464522@dana.test",
+    "from_addr": "dana@company.com",
+    "reply_to": "dana@company.com",
+    "return_path": "dana@company.com",
+    "auth_results": {
+      "raw": "spf=pass dkim=pass dmarc=pass"
+    },
+    "subject": "Meeting request",
+    "body_text": "Can we meet on 2026-11-30 at 10:00 IST for 30 minutes? Thanks, Dana\r\n",
+    "hidden_text_flag": false,
+    "header_flags": [],
+    "received_at": "2026-11-27T21:10:25Z",
+    "size_bytes": 662
+  },
+  "intent": {
+    "kind": "meeting_request",
+    "confidence": 0.92,
+    "title": "Meeting request",
+    "duration_min": 30,
+    "windows": [
+      {
+        "start_iso": "2026-11-30T10:00:00+05:30",
+        "end_iso": "2026-11-30T10:30:00+05:30",
+        "raw_phrase": "Can we meet on 2026-11-30 at 10:00 IST for 30 minutes?",
+        "tz": "Asia/Kolkata",
+        "flexibility": "exact"
+      }
+    ],
+    "attendees": [],
+    "location_pref": null,
+    "ambiguity": [],
+    "injection_suspected": false,
+    "rationale": "stub extraction: kind=meeting_request, phrase='Can we meet on 2026-11-30 at 10:00 IST for 30 minutes?', tz=IST, duration=30m",
+    "selected_slot": null
+  },
+  "busy": [],
+  "screen": {
+    "injection_score": 0.0,
+    "flags": [],
+    "spoof": false
+  },
+  "slots": [
+    {
+      "start_utc": "2026-11-30T04:30:00Z",
+      "end_utc": "2026-11-30T05:00:00Z",
+      "score": 4.4,
+      "reasons": [
+        "inside requested window",
+        "preferred hours"
+      ]
+    }
+  ]
+}

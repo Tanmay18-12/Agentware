@@ -1,0 +1,27 @@
+{
+  "message_id": "<02_conflict_request-20261127@mail.example.com>",
+  "intent": {
+    "kind": "meeting_request",
+    "confidence": 0.92,
+    "title": "Intro call with our platform team",
+    "duration_min": 30,
+    "windows": [
+      {
+        "start_iso": "2026-11-30T11:00:00+05:30",
+        "end_iso": "2026-11-30T11:30:00+05:30",
+        "raw_phrase": "Would 2026-11-30 at 11:00 IST work for a 30 minute intro call?",
+        "tz": "Asia/Kolkata",
+        "flexibility": "exact"
+      }
+    ],
+    "attendees": [],
+    "location_pref": null,
+    "ambiguity": [],
+    "injection_suspected": false,
+    "rationale": "stub extraction: kind=meeting_request, phrase='Would 2026-11-30 at 11:00 IST work for a 30 minute intro call?', tz=IST, duration=30m",
+    "selected_slot": null
+  },
+  "model": "cassette:stub-recording",
+  "tokens": 0,
+  "cost_usd": 0.0
+}

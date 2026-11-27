@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from ..config import Prefs
@@ -135,7 +134,3 @@ def render_clarification(intent: MeetingIntent, prefs: Prefs, question: str | No
     detail = question or "Could you confirm the date, start time and timezone you have in mind?"
     body = f"{_greeting(intent)}\n\nThanks — I can schedule this. {detail}\n{FOOTER}"
     return subject, body
-
-
-def render_file_note(prefs: Prefs) -> str:
-    return "no reply needed"

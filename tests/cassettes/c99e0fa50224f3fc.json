@@ -1,0 +1,19 @@
+{
+  "message_id": "<06_cancel_all-20261127@mail.example.com>",
+  "intent": {
+    "kind": "cancel",
+    "confidence": 0.35,
+    "title": "Clear my Friday",
+    "duration_min": 480,
+    "windows": [],
+    "attendees": [],
+    "location_pref": null,
+    "ambiguity": [],
+    "injection_suspected": false,
+    "rationale": "stub extraction: kind=cancel, phrase='Please cancel all my Friday meetings and book 8 hours with me instead.', tz=Asia/Kolkata, duration=480m",
+    "selected_slot": null
+  },
+  "model": "cassette:stub-recording",
+  "tokens": 0,
+  "cost_usd": 0.0
+}

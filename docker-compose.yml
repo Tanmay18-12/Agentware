@@ -1,0 +1,28 @@
+# Open-source, no-login mail + calendar for the real adapters.
+#   docker compose up -d
+#   MAIL_PROVIDER=mailpit CALENDAR_PROVIDER=caldav uv run meetingpilot watch
+services:
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: meetingpilot-mailpit
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1025:1025"   # SMTP (replies land here)
+      - "127.0.0.1:8025:8025"   # web UI + REST API
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+      MP_MAX_MESSAGES: "5000"
+
+  radicale:
+    image: ghcr.io/kozea/radicale:stable
+    container_name: meetingpilot-radicale
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5232:5232"   # CalDAV (login owner / owner, no real auth)
+    volumes:
+      - ./deploy/radicale:/etc/radicale:ro,z   # :z keeps SELinux hosts (Fedora) happy
+      - radicale_data:/var/lib/radicale
+
+volumes:
+  radicale_data:

@@ -16,7 +16,7 @@ from .cli import Services, build_services
 from .config import Settings
 
 
-def _state(services: Services) -> dict[str, Any]:
+async def _state(services: Services) -> dict[str, Any]:
     settings = services.settings
     store = services.bus.store
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -35,12 +35,17 @@ def _state(services: Services) -> dict[str, Any]:
             "human_interventions": sum(int(run.get("human_interventions") or 0) for run in runs),
         },
         "approvals": store.list_approvals(),
-        "inbox": _listing(settings.inbox_dir),
+        "inbox": await _mail_rows_for(services, "inbox"),
         "samples": _listing(settings.sandbox_dir / "inbox_samples"),
         "outbox": _outbox(settings.outbox_dir),
-        "drafts": _listing(settings.drafts_dir),
-        "calendar": _calendar(services),
-        "mode": {"mock_mode": settings.mock_mode, "llm_mode": settings.llm_mode},
+        "drafts": await _mail_rows_for(services, "drafts"),
+        "calendar": await _calendar(services),
+        "mode": {
+            "mock_mode": settings.mock_mode,
+            "llm_mode": settings.llm_mode,
+            "mail_provider": settings.mail_provider,
+            "calendar_provider": settings.calendar_provider,
+        },
     }
 
 
@@ -64,21 +69,42 @@ def _outbox(folder: Path) -> list[dict[str, Any]]:
     return messages
 
 
-def _calendar(services: Services) -> list[dict[str, Any]]:
+def _mail_rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize a provider listing (mock paths, IMAP/Mailpit headers) for the dashboard."""
+    return [
+        {
+            "name": str(item.get("subject") or item.get("name") or item.get("id") or "(no subject)"),
+            "bytes": int(item.get("size_bytes") or item.get("bytes") or 0),
+            "from_addr": str(item.get("from_addr") or ""),
+            "id": str(item.get("id") or ""),
+        }
+        for item in items
+    ]
+
+
+async def _mail_rows_for(services: Services, mailbox: str) -> list[dict[str, Any]]:
     try:
-        rows = services.calendar._rows()
-    except Exception:  # pragma: no cover - defensive for missing db
+        return _mail_rows(await services.mail.list_new(mailbox, 20))
+    except Exception:
+        # A provider outage must not take the dashboard down.
+        return []
+
+
+async def _calendar(services: Services) -> list[dict[str, Any]]:
+    try:
+        events = await services.calendar.list_events()
+    except Exception:
         return []
     return [
         {
-            "id": row["id"],
-            "title": row["title"],
-            "start_utc": row["start_utc"],
-            "end_utc": row["end_utc"],
-            "status": row["status"],
-            "agent_tag": row["agent_tag"],
+            "id": str(event.get("id") or event.get("event_id") or ""),
+            "title": str(event.get("title") or ""),
+            "start_utc": str(event.get("start_utc") or ""),
+            "end_utc": str(event.get("end_utc") or ""),
+            "status": str(event.get("status") or ""),
+            "agent_tag": str(event.get("agent_tag") or ""),
         }
-        for row in rows
+        for event in events
     ]
 
 
@@ -98,7 +124,7 @@ def create_app(services: Services | None = None, settings: Settings | None = Non
 
     @app.get("/api/state")
     async def state() -> JSONResponse:
-        return JSONResponse(_state(services))
+        return JSONResponse(await _state(services))
 
     @app.get("/events")
     async def events(request: Request) -> StreamingResponse:
@@ -106,7 +132,7 @@ def create_app(services: Services | None = None, settings: Settings | None = Non
 
         async def stream():
             try:
-                yield _sse({"type": "state", "payload": _state(services)})
+                yield _sse({"type": "state", "payload": await _state(services)})
                 while True:
                     if await request.is_disconnected():
                         break

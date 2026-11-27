@@ -21,10 +21,6 @@ class ValidationResult:
     duration_min: int = 30
     hard_fail: bool = False
 
-    @property
-    def actionable(self) -> bool:
-        return self.ok
-
 
 def resolve_tz(name: str | None, fallback: str) -> ZoneInfo:
     candidate = (name or fallback or "UTC").strip()
@@ -121,7 +117,11 @@ def validate_intent(
                 issues.append(f"{raw} does not exist in {tz} (DST spring-forward gap)")
                 hard_fail = True
             if local_is_ambiguous(parsed):
-                issues.append(f"{raw} is ambiguous in {tz} (DST fall-back)")
+                # The wall time occurs twice; guessing a fold could book the wrong hour.
+                issues.append(
+                    f"{raw} is ambiguous in {tz} (DST fall-back): please send an explicit UTC offset"
+                )
+                hard_fail = True
             if parsed < now - timedelta(minutes=1):
                 issues.append(f"{raw} is in the past")
                 hard_fail = True

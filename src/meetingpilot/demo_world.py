@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from .config import Settings
 from .pipeline.ingest import Ingest
 from .pipeline.reader_llm import stub_extract
-from .schemas import EmailEnvelope
 
 SAMPLE_DIR_NAME = "inbox_samples"
 
@@ -38,7 +35,6 @@ def _at(day: datetime, clock: time, tz: ZoneInfo) -> datetime:
 
 def build_samples(now: datetime, settings: Settings) -> list[Sample]:
     tz = ZoneInfo(settings.prefs.owner_tz)
-    today = now.astimezone(tz)
     d1 = _next_business_day(now, tz)
     d2 = _next_business_day(d1, tz)
     owner = settings.prefs.owner_email
@@ -135,7 +131,6 @@ def build_samples(now: datetime, settings: Settings) -> list[Sample]:
 
 def seed(settings: Settings, reset: bool = True) -> dict[str, Any]:
     from .adapters.mock_calendar import MockCalendar
-    from .event_bus import StateStore
 
     settings.ensure_dirs()
     sample_dir = settings.sandbox_dir / SAMPLE_DIR_NAME
@@ -171,7 +166,6 @@ def seed(settings: Settings, reset: bool = True) -> dict[str, Any]:
         (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0).isoformat(),
     )
 
-    store = StateStore(settings.database_path)
     ingest = Ingest(settings, store=None)
     samples = build_samples(now, settings)
     settings.cassettes_dir.mkdir(parents=True, exist_ok=True)

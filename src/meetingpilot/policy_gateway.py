@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -48,7 +48,6 @@ class ToolSpec:
     stages: tuple[str, ...]
 
 
-READ_STAGES = ("act", "schedule", "verify")
 REGISTRY: dict[str, ToolSpec] = {
     "mail.list_new": ToolSpec("mail.list_new", "READ", MailListNewArgs, ("act", "ingest")),
     "mail.read": ToolSpec("mail.read", "READ", MailReadArgs, ("act", "ingest")),
@@ -209,7 +208,7 @@ class PolicyGateway:
         if action.tool == "mail.send_reply":
             guard_verdict = self._guard_send(args, envelope, action, runtime)
         elif action.tool == "calendar.confirm_event":
-            guard_verdict = await self._guard_book(args, runtime, action, started)
+            guard_verdict = await self._guard_book(args, runtime)
         if guard_verdict is not None:
             verdict, rules, explanation = guard_verdict
             return self._finish(action, verdict, rules, explanation, started)  # type: ignore[arg-type]
@@ -341,7 +340,7 @@ class PolicyGateway:
         return None
 
     async def _guard_book(
-        self, args: ConfirmEventArgs, runtime: ToolRuntime, action: ActionRequest, started: float
+        self, args: ConfirmEventArgs, runtime: ToolRuntime
     ) -> tuple[str, list[str], str] | None:
         if args.agent_tag != AGENT_TAG:
             return "BLOCK", ["P5"], "refusing to confirm an event the agent does not own"
