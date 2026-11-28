@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,13 @@ from fastapi.staticfiles import StaticFiles
 
 from .cli import Services, build_services
 from .config import Settings
+
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def is_loopback_host(host: str) -> bool:
+    """True when the dashboard is only reachable from this machine."""
+    return (host or "").strip().strip("[]").lower() in LOOPBACK_HOSTS
 
 
 async def _state(services: Services) -> dict[str, Any]:
@@ -111,6 +119,33 @@ async def _calendar(services: Services) -> list[dict[str, Any]]:
 def create_app(services: Services | None = None, settings: Settings | None = None) -> FastAPI:
     services = services or build_services(settings)
     app = FastAPI(title="MeetingPilot", version="0.1.0")
+    token = (services.settings.dashboard_token or "").strip()
+    # An exposed dashboard can send mail and book events: without a token it stays closed.
+    locked_down = not token and not is_loopback_host(services.settings.host)
+
+    @app.middleware("http")
+    async def require_dashboard_token(request: Request, call_next):
+        path = request.url.path
+        if path != "/events" and not path.startswith("/api/"):
+            return await call_next(request)
+        if locked_down:
+            return JSONResponse(
+                {"detail": "dashboard locked: set DASHBOARD_TOKEN when HOST is not loopback"},
+                status_code=503,
+            )
+        if token:
+            provided = (
+                request.headers.get("x-dashboard-token")
+                or request.query_params.get("token")
+                or ""
+            )
+            authorization = request.headers.get("authorization") or ""
+            if not provided and authorization.lower().startswith("bearer "):
+                provided = authorization[7:].strip()
+            if not hmac.compare_digest(provided, token):
+                return JSONResponse({"detail": "invalid or missing dashboard token"}, status_code=401)
+        return await call_next(request)
+
     static_dir = services.settings.root / "static"
     if static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")

@@ -87,3 +87,47 @@ def test_reject_endpoint_is_idempotent_for_the_queue(tmp_path):
 
     missing = client.post("/api/reject/apr_test")
     assert missing.status_code == 404
+
+
+def _services_with(tmp_path, *, host: str = "127.0.0.1", token: str = "") -> Services:
+    world = make_world(tmp_path, prefs=base_prefs(min_notice_hours=0), busy=[])
+    world.settings.host = host
+    world.settings.dashboard_token = token
+    return Services(
+        settings=world.settings,
+        bus=world.bus,
+        mail=ProviderMail(world.settings),
+        calendar=ProviderCalendar(world.settings),
+        kill=world.kill,
+        orchestrator=world.orchestrator,
+    )
+
+
+def test_dashboard_token_guards_state_and_controls(tmp_path):
+    services = _services_with(tmp_path, token="s3cret")
+    client = TestClient(create_app(services))
+
+    assert client.get("/api/state").status_code == 401
+    assert client.post("/api/kill").status_code == 401
+    assert services.kill.status().get("triggered") is False
+
+    assert client.get("/api/state", headers={"X-Dashboard-Token": "s3cret"}).status_code == 200
+    assert client.get("/api/state", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+    assert client.get("/api/state", headers={"X-Dashboard-Token": "wrong"}).status_code == 401
+
+
+def test_non_loopback_bind_without_token_is_locked_down(tmp_path):
+    services = _services_with(tmp_path, host="0.0.0.0")
+    client = TestClient(create_app(services))
+
+    assert client.get("/api/state").status_code == 503
+    assert client.post("/api/kill").status_code == 503
+    assert services.kill.status().get("triggered") is False
+    # The page itself is not token-gated (the test world has no static/ dir, hence 404).
+    assert client.get("/").status_code != 503
+
+
+def test_loopback_without_token_stays_open(tmp_path):
+    client = TestClient(create_app(_services_with(tmp_path)))
+
+    assert client.get("/api/state").status_code == 200

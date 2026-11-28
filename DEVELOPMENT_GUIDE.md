@@ -48,6 +48,7 @@ project is configured for uv + hatchling and `pytest` relies on `pythonpath = ["
 | `OWNER_EMAIL`, `OWNER_NAME` | from `prefs.yaml` | identity used by adapters |
 | `SANDBOX_DIR`, `TRACES_DIR`, `DATABASE_PATH`, `CONFIG_PATH` | `sandbox`, `traces`, … | paths |
 | `HOST`, `PORT` | `127.0.0.1`, `8000` | dashboard bind (`PORT=0` falls back to 8000) |
+| `DASHBOARD_TOKEN` | unset | required when `HOST` is not loopback; send as `X-Dashboard-Token`, `Authorization: Bearer`, or `?token=` for SSE |
 | `MAIL_PROVIDER` | `mock` | `mock` \| `imap` \| `mailpit` |
 | `CALENDAR_PROVIDER` | `mock` | `mock` \| `caldav` |
 | `IMAP_HOST/PORT/USER/PASSWORD/SSL/MAILBOX/DRAFTS_MAILBOX` | `127.0.0.1`, `1143`, `meetingpilot`, `meetingpilot`, `0`, `INBOX`, `Drafts` | IMAP adapter |
@@ -150,7 +151,8 @@ uv run pytest tests/test_scheduler_dst.py -v    # DST + interval math
 | `tests/test_reader_live.py` | live LLM against a loopback HTTP server (5 tests) |
 | `tests/test_real_adapters.py` | IMAP (fake transport), CalDAV + Mailpit (real loopback HTTP), iCalendar `TZID`/`DURATION`/folded lines, gateway/fault-injection, provider selection |
 | `tests/test_approvals.py` | approval queue: approve books + sends via the gateway, reject sends nothing, approvals survive kill/resume |
-| `tests/test_server.py` | `/api/state` reads mail/calendar providers (not sandbox files); reject endpoint only decides pending approvals |
+| `tests/test_server.py` | `/api/state` reads mail/calendar providers (not sandbox files); reject endpoint only decides pending approvals; `DASHBOARD_TOKEN` gates `/api/*` + `/events`, non-loopback binds lock down |
+| `tests/test_prefilter.py` | sender rate limit: dropped mail does not extend its own block window |
 | `tests/trap_pack/test_trap_pack.py` | 32 cases → expected decision, no unregistered tool, no quarantine actions, no leaked addresses/titles; writes `trap_pack_report.json` |
 
 Missing coverage (see `PROJECT_STATUS.md`): provider `watch` loop, real IMAP server, real OpenAI,

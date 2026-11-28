@@ -119,6 +119,8 @@
 const STEPS = ["ingest","prefilter","screen","reader","validate","schedule","decide","act","verify","record"];
 const state = { world: [], tab: "samples", kill: {} };
 const $ = (id) => document.getElementById(id);
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+const tokenHeaders = (base) => TOKEN ? { ...base, "X-Dashboard-Token": TOKEN } : base;
 
 function paintHeader(s){
   const ks = s.kill_switch || {};
@@ -237,7 +239,7 @@ function paintWorld(){
 }
 
 async function act(url, body){
-  const options = {method:"POST", headers:{"Content-Type":"application/json"}};
+  const options = {method:"POST", headers: tokenHeaders({"Content-Type":"application/json"})};
   if (body) options.body = JSON.stringify(body);
   const response = await fetch(url, options);
   await response.json().catch(() => ({}));
@@ -245,7 +247,13 @@ async function act(url, body){
 }
 
 async function refresh(){
-  const response = await fetch("/api/state");
+  const response = await fetch("/api/state", {headers: tokenHeaders({})});
+  if(!response.ok){
+    const badge = $("status");
+    badge.textContent = response.status === 401 ? "TOKEN?" : "LOCKED";
+    badge.className = "pill halt";
+    return;
+  }
   paintHeader(await response.json());
 }
 
@@ -272,7 +280,7 @@ function escapeHtml(value){
 
 paintStepper(statusByName);
 refresh();
-const stream = new EventSource("/events");
+const stream = new EventSource("/events" + (TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ""));
 stream.onmessage = (message) => { try { handleEvent(JSON.parse(message.data)); } catch (e) { console.error(e); } };
 stream.onerror = () => feed(`<span class="t">--</span><span class="tag bad">stream</span> reconnecting…`);
 </script>

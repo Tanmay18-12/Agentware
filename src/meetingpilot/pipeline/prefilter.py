@@ -34,7 +34,6 @@ def prefilter(envelope: EmailEnvelope, prefs: Prefs, store: StateStore | None = 
     if store is not None:
         key = f"mail:{envelope.from_addr.lower()}"
         if store.hits_since(key, 3600) >= prefs.sender_emails_per_hour:
-            store.hit(key)
             return PrefilterResult(True, "skipped: sender exceeded per-hour email rate limit")
         store.hit(key)
 

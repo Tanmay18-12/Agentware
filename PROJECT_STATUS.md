@@ -64,11 +64,13 @@ when `DTEND` is absent, treats `VALUE=DATE` as an all-day event, and unfolds fol
 container: a foreign `DTSTART;TZID=Asia/Kolkata:20261130T100000` + `DURATION:PT30M` event shows
 04:30–05:00Z in free/busy (previously 10:00–10:30Z).
 
-**RISK-01 — Dashboard/API have no authentication and bind is configurable.**
-`server.py` exposes `/api/inject`, `/api/kill`, `/api/approve`. Defaults to `127.0.0.1`
-(`config.py` `host`), which is acceptable locally; setting `HOST=0.0.0.0` exposes an agent that can
-send mail and book events. *Mitigation now*: document loopback-only; *fix before staging*: token auth
-+ HTTPS.
+**RISK-01 — MITIGATED 2026-11-28: token auth for every control endpoint.**
+`server.py` exposes `/api/inject`, `/api/kill`, `/api/approve`, so every `/api/*` request and the
+`/events` stream now require `DASHBOARD_TOKEN` when one is configured (`X-Dashboard-Token`,
+`Authorization: Bearer …`, or `?token=` for SSE), compared with `hmac.compare_digest`. A non-loopback
+`HOST` with no token fails closed (HTTP 503) and `meetingpilot serve` refuses to start; the dashboard
+page forwards the token from `?token=`. Still open before staging: TLS and per-user identity.
+Tests: `tests/test_server.py`.
 
 ### MEDIUM
 
@@ -106,16 +108,16 @@ concurrent clients this can block the event loop. Local-only today.
 
 | ID | Finding | Location |
 |---|---|---|
-| BUG-05 | `prefilter` records an extra hit when the hourly sender limit trips, extending the block | `pipeline/prefilter.py:37-39` |
-| BUG-06 | Invalid `MAIL_PROVIDER`/`CALENDAR_PROVIDER` raises an uncaught traceback instead of a clean CLI error | `cli.py:53-71`, `main` `:397` |
+| BUG-05 | FIXED 2026-11-28: a rate-limited sender recorded an extra hit per dropped message, extending its own block; only accepted mail is counted now | `pipeline/prefilter.py`, `tests/test_prefilter.py` |
+| BUG-06 | FIXED 2026-11-28: invalid `MAIL_PROVIDER`/`CALENDAR_PROVIDER` exits 2 with a one-line message instead of a traceback | `cli.py` `main` |
 | BUG-07 | Mailpit `read()` returns the Mailpit ID as `message_id` (IMAP returns the RFC Message-ID) | `adapters/mailpit_mail.py:69-84` |
 | BUG-08 | CalDAV `_ready` is cached forever; a Radicale restart mid-process yields 409/PUT failures until restart | `adapters/caldav_calendar.py:225-250` |
 | BUG-09 | `EventBus.emit` reads `seq` and `prev_hash` in separate lock acquisitions; concurrent emits for one run could collide on `(run_id, seq)` | `event_bus.py:337-352` |
 | BUG-10 | A new `httpx.AsyncClient` is created per request (no pooling) | `caldav_calendar.py:200-208`, `mailpit_mail.py:36-47` |
 | BUG-11 | `AGENT.md` says “68 tests”; `SAFETY.md` line references are stale after the cleanup (e.g. P4 now `:300`, P5 `:342`, P6 `:380`, kill watcher `:86`, `emit` `:337`) | `AGENT.md:97`, `SAFETY.md:16-23` |
-| BUG-12 | `.env.example` starts with a stray `[TEMPLATE]` line | `.env.example:1` |
-| BUG-13 | `tests/test_policy_gateway.py` creates a world in `tempfile.mkdtemp()` at import time and never cleans it | `tests/test_policy_gateway.py:32` |
-| BUG-14 | `MockCalendar.confirm_event` accepts but ignores `agent_tag` (protocol parity) | `adapters/mock_calendar.py:137` |
+| BUG-12 | FIXED 2026-11-28: stray `[TEMPLATE]` line removed; `.env.example` documents `DASHBOARD_TOKEN` | `.env.example` |
+| BUG-13 | FIXED 2026-11-28: module-level `TemporaryDirectory` cleans the shared gateway world at exit | `tests/test_policy_gateway.py` |
+| BUG-14 | FIXED 2026-11-28: `MockCalendar.confirm_event` persists the passed `agent_tag` (protocol parity with CalDAV) | `adapters/mock_calendar.py` |
 | BUG-15 | Live-reader cost is a hardcoded `$0.15 / 1M tokens` estimate, not model pricing | `pipeline/reader_llm.py:176` |
 
 ### INFORMATIONAL
@@ -144,9 +146,9 @@ concurrent clients this can block the event loop. Local-only today.
 
 ## 5. Test coverage
 
-Current: **103 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
+Current: **115 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
 scheduler/DST/validator 19, kill switch 4, replay/audit 6, live reader 5, real adapters 27
-(incl. the TZID/DURATION and ambiguity regressions), approvals 3, dashboard 2, trap pack 33
+(incl. the TZID/DURATION and ambiguity regressions), approvals 3, dashboard 5, prefilter 2, trap pack 33
 (32 cases + report), plus helpers.
 
 Missing coverage, in priority order:
@@ -182,8 +184,8 @@ dashboard should require a token even on loopback; whether to persist provider c
 
 ### Priority 1 — must fix before showing real calendars
 
-1. **Decide/implement dashboard auth for non-loopback hosts** — RISK-01. Files: `server.py`,
-   `config.py`, docs. Complexity: Medium.
+1. *(Done 2026-11-28: `DASHBOARD_TOKEN` gates every `/api/*` and `/events` request, and a non-loopback
+   bind without a token fails closed — RISK-01.)* Still open: TLS for non-loopback deployments.
 
 *(Done 2026-11-27: CalDAV `TZID`/`VTIMEZONE`/`DURATION` — BUG-01; DST fall-back CLARIFY — BUG-03,
 both with regression tests.)*

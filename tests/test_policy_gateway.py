@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
+import shutil
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,7 +21,10 @@ from meetingpilot.policy_gateway import (
 )
 from meetingpilot.schemas import EmailEnvelope
 
-SHARED = make_world(Path(tempfile.mkdtemp(prefix="mp-gateway-")), llm_mode="stub")
+_TEMP_DIR = Path(tempfile.mkdtemp(prefix="mp-gateway-"))
+# ignore_errors: on Windows the shared SQLite file is still open when the interpreter exits.
+atexit.register(shutil.rmtree, _TEMP_DIR, ignore_errors=True)
+SHARED = make_world(_TEMP_DIR, llm_mode="stub")
 ENVELOPE = EmailEnvelope(
     message_id="<gateway-1@mail.example.com>",
     thread_id="thread-gateway",

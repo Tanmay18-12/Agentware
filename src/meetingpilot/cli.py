@@ -337,12 +337,28 @@ def cmd_status(args: argparse.Namespace, settings: Settings) -> int:
 def cmd_serve(args: argparse.Namespace, settings: Settings) -> int:
     import uvicorn
 
-    from .server import create_app
+    from .server import create_app, is_loopback_host
+
+    token = (settings.dashboard_token or "").strip()
+    if not token and not is_loopback_host(settings.host):
+        print(
+            f"refusing to bind the dashboard to {settings.host!r} without DASHBOARD_TOKEN: "
+            "anyone who can reach it could inject mail, send replies and book events. "
+            "Set DASHBOARD_TOKEN, or leave HOST at 127.0.0.1.",
+            file=sys.stderr,
+        )
+        return 2
 
     services = build_services(settings)
     app = create_app(services)
     port = settings.port if settings.port and settings.port > 0 else 8000
     print(f"dashboard: http://{settings.host}:{port}", flush=True)
+    if token:
+        print(
+            f"open http://{settings.host}:{port}/?token=<DASHBOARD_TOKEN> "
+            "(requests without the token are rejected)",
+            flush=True,
+        )
     uvicorn.run(app, host=settings.host, port=port, log_level="warning")
     return 0
 
@@ -411,7 +427,12 @@ def main(argv: list[str] | None = None) -> int:
         "status": cmd_status,
         "serve": cmd_serve,
     }
-    return handlers[args.command](args, settings)
+    try:
+        return handlers[args.command](args, settings)
+    except ValueError as error:
+        # Misconfigured providers (e.g. MAIL_PROVIDER=imapx) deserve a message, not a traceback.
+        print(f"meetingpilot: {error}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
