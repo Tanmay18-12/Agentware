@@ -42,7 +42,7 @@ Repository state: `main` at `9fff857`, no tagged release. CI lives in
 | Trap Pack | COMPLETE | `tests/trap_pack/` | 32/32 pass, report regenerated |
 | Gmail / Google Calendar OAuth | NOT IMPLEMENTED | — | plan COULD; use IMAP/CalDAV |
 | Reschedule/cancel of existing events | NOT IMPLEMENTED (by design) | `orchestrator.py:398-410` | always ESCALATE |
-| Attachment parsing (.ics invites) | NOT IMPLEMENTED | `pipeline/ingest.py` | non-`.ics` ignored |
+| Attachment parsing (.ics invites) | COMPLETE | `pipeline/ingest.py`, `tests/test_ingest_ics.py` | `text/calendar` parts and `*.ics` attachments are parsed and described to the reader (first three invites; the series start of a recurring invite, not its occurrences); the `ics_attachment` flag is set |
 | Multi-user / shared calendars | NOT IMPLEMENTED | — | single owner |
 | Recurring events (`RRULE`/`EXDATE`) | IMPLEMENTED for free/busy | `caldav_calendar.py` | DAILY/WEEKLY/MONTHLY/YEARLY with `INTERVAL`/`COUNT`/`UNTIL`/`BYDAY` + `EXDATE`; `BYSETPOS`/`BYMONTHDAY` unsupported; `list_events` lists the series once |
 
@@ -146,13 +146,15 @@ concurrent clients this can block the event loop. Local-only today.
 
 ## 5. Test coverage
 
-Current: **137 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
+Current: **141 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
 scheduler/DST/validator 19, kill switch 4, replay/audit 6, live reader 8, real adapters 27
 (incl. the TZID/DURATION and ambiguity regressions), approvals 3, dashboard 5, prefilter 2, concurrency 1, trap pack 33
-(32 cases + report), caldav recurrence 10, adapter regressions 4, adapter pooling 4, plus helpers.
+(32 cases + report), caldav recurrence 10, adapter regressions 4, adapter pooling 4, ics ingest 4,
+plus helpers.
 
 Missing coverage, in priority order:
 
+- Recurring invites as attachments (only the series start is described).
 - CalDAV `BYSETPOS`/`BYMONTHDAY` rules (the common shapes are covered by `tests/test_caldav_recurrence.py`).
 - `Orchestrator.approve()` and `/api/approve|reject` end-to-end.
 - Dashboard `_state`, SSE disconnect behaviour, `/api/inject` error paths.
@@ -200,7 +202,8 @@ both with regression tests.)*
 4. *(Done 2026-11-28: atomic event sequence allocation — BUG-09 — and connection/HTTP pooling
    — BUG-10.)*
 5. Provider cursor/`processed` state for `watch` so more than the latest N messages are handled.
-6. ICS attachment parsing (`RRULE`/`EXDATE` support landed 2026-11-28).
+6. *(Done 2026-11-28: `text/calendar` attachments are parsed and described to the reader —
+   `tests/test_ingest_ics.py`.)*
 7. Clean up test temp dirs (BUG-13), `.env.example` (BUG-12).
 
 ### Priority 4 — future
