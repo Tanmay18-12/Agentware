@@ -38,6 +38,13 @@ class Services:
     kill: KillSwitch
     orchestrator: Orchestrator
 
+    async def aclose(self) -> None:
+        """Release pooled provider clients; mock providers have nothing to close."""
+        for provider in (self.mail, self.calendar):
+            close = getattr(provider, "aclose", None)
+            if close is not None:
+                await close()
+
 
 def build_services(settings: Settings | None = None) -> Services:
     settings = settings or Settings.from_env()
@@ -194,6 +201,8 @@ def cmd_watch(args: argparse.Namespace, settings: Settings) -> int:
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\nstopped")
+    finally:
+        asyncio.run(services.aclose())
     return 0
 
 
@@ -222,6 +231,8 @@ def _watch_provider(args: argparse.Namespace, services: Services) -> int:
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\nstopped")
+    finally:
+        asyncio.run(services.aclose())
     return 0
 
 
