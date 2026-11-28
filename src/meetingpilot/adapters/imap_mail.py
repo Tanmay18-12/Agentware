@@ -70,14 +70,23 @@ class ImapMail:
         return list((data[0] or b"").split())
 
     # -- read side -----------------------------------------------------
-    async def list_new(self, mailbox: str = "inbox", limit: int = 10) -> list[dict[str, Any]]:
-        return await asyncio.to_thread(self._list_new_sync, mailbox, limit)
+    async def list_new(
+        self, mailbox: str = "inbox", limit: int = 10, cursor: str | None = None
+    ) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._list_new_sync, mailbox, limit, cursor)
 
-    def _list_new_sync(self, mailbox: str, limit: int) -> list[dict[str, Any]]:
+    def _list_new_sync(
+        self, mailbox: str, limit: int, cursor: str | None = None
+    ) -> list[dict[str, Any]]:
         folder = self.settings.imap_mailbox if mailbox == "inbox" else self.settings.imap_drafts_mailbox
         with self._imap() as client:
             self._select(client, folder)
-            uids = self._search(client, "ALL")[-limit:]
+            uids = self._search(client, "ALL")
+            if cursor is None:
+                uids = uids[-limit:]
+            else:
+                floor = _uid_value(cursor)
+                uids = [uid for uid in uids if _uid_value(uid) > floor][:limit]
             items: list[dict[str, Any]] = []
             for uid in uids:
                 status, data = client.uid(
@@ -203,6 +212,15 @@ class ImapMail:
         with self._followups.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
         return {"followup_id": uuid.uuid4().hex[:12], **record}
+
+
+def _uid_value(uid: Any) -> int:
+    """IMAP UIDs are increasing integers; a non-numeric handle sorts first."""
+    raw = uid.decode() if isinstance(uid, bytes) else str(uid)
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
 
 
 def _first_address(value: str) -> str:

@@ -26,12 +26,25 @@ def _header_message_id(raw: str) -> str:
     return ""
 
 
+_PAGE_SIZE = 200
+_MAX_SCAN = 2000
+
+
+def _handle_number(value: Any) -> int:
+    """Mailpit ids are increasing integers; a non-numeric handle sorts first."""
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 class MailpitMail:
     def __init__(self, settings: Settings, *, smtp_factory: Any | None = None):
         self.settings = settings
         self.sender = SmtpSender(settings, smtp_factory)
         self._local = MockMail(settings)
         self._base = settings.mailpit_url.rstrip("/")
+        self._http: httpx.AsyncClient | None = None
 
     # -- HTTP ----------------------------------------------------------
     def _fail(self, response: httpx.Response, action: str) -> None:
@@ -42,28 +55,41 @@ class MailpitMail:
             raise ServerError(detail)
         raise ProviderError(detail)
 
+    def _http_client(self) -> httpx.AsyncClient:
+        """One pooled client per adapter, so TCP connections survive between polls."""
+        if self._http is None or self._http.is_closed:
+            kwargs: dict[str, Any] = {"timeout": self.settings.mailpit_timeout_s}
+            if self.settings.mailpit_user:
+                kwargs["auth"] = (self.settings.mailpit_user, self.settings.mailpit_password)
+            self._http = httpx.AsyncClient(**kwargs)
+        return self._http
+
+    async def aclose(self) -> None:
+        client, self._http = self._http, None
+        if client is not None:
+            await client.aclose()
+
     async def _get(self, path: str) -> httpx.Response:
-        kwargs: dict[str, Any] = {"timeout": self.settings.mailpit_timeout_s}
-        if self.settings.mailpit_user:
-            kwargs["auth"] = (self.settings.mailpit_user, self.settings.mailpit_password)
         try:
-            async with httpx.AsyncClient(**kwargs) as client:
-                return await client.get(f"{self._base}{path}")
+            return await self._http_client().get(f"{self._base}{path}")
         except httpx.TimeoutException as error:
             raise ProviderTimeout(f"mailpit request timed out: {path}") from error
         except httpx.HTTPError as error:
             raise ProviderError(f"mailpit request failed: {error}") from error
 
     # -- read side -----------------------------------------------------
-    async def list_new(self, mailbox: str = "inbox", limit: int = 10) -> list[dict[str, Any]]:
+    async def list_new(
+        self, mailbox: str = "inbox", limit: int = 10, cursor: str | None = None
+    ) -> list[dict[str, Any]]:
         if mailbox != "inbox":
             # Drafts live locally: Mailpit has no drafts concept.
-            return await self._local.list_new(mailbox, limit)
-        response = await self._get("/api/v1/messages")
-        if response.status_code != 200:
-            self._fail(response, "list messages")
+            return await self._local.list_new(mailbox, limit, cursor)
+        if cursor is None:
+            messages = await self._messages()
+        else:
+            messages = (await self._messages_after(_handle_number(cursor)))[:limit]
         items: list[dict[str, Any]] = []
-        for message in response.json().get("messages", [])[:limit]:
+        for message in messages:
             sender = message.get("From") or {}
             items.append(
                 {
@@ -77,6 +103,35 @@ class MailpitMail:
                 }
             )
         return items
+
+    async def _messages(self) -> list[dict[str, Any]]:
+        response = await self._get("/api/v1/messages")
+        if response.status_code != 200:
+            self._fail(response, "list messages")
+        return list(response.json().get("messages", []))
+
+    async def _messages_after(self, floor: int) -> list[dict[str, Any]]:
+        """Every message whose numeric id is above ``floor``, oldest first.
+
+        Mailpit lists newest first, so pages are walked from the newest message and the
+        matches are sorted; the caller takes the oldest ``limit`` and the next poll
+        resumes from there.
+        """
+        found: list[dict[str, Any]] = []
+        start = 0
+        while start < _MAX_SCAN:
+            response = await self._get(f"/api/v1/messages?start={start}&limit={_PAGE_SIZE}")
+            if response.status_code != 200:
+                self._fail(response, "list messages")
+            batch = list(response.json().get("messages", []))
+            if not batch:
+                break
+            found.extend(item for item in batch if _handle_number(item.get("ID")) > floor)
+            start += len(batch)
+            if len(batch) < _PAGE_SIZE:
+                break
+        found.sort(key=lambda item: _handle_number(item.get("ID")))
+        return found
 
     async def read(self, message_id: str) -> dict[str, Any] | None:
         """Accepts either Mailpit's own message ID or the RFC 5322 Message-ID."""

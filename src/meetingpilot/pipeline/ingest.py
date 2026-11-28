@@ -84,6 +84,46 @@ def _header_flags(
     return flags
 
 
+def _is_calendar_part(part: Any) -> bool:
+    return part.get_content_type() == "text/calendar" or (part.get_filename() or "").lower().endswith(
+        ".ics"
+    )
+
+
+def _calendar_events(part: Any) -> list[dict[str, Any]]:
+    """Parse one ``text/calendar`` part; a malformed invite is ignored, not fatal."""
+    from ..adapters.caldav_calendar import parse_ics
+
+    raw = part.get_payload(decode=True)
+    text = (
+        raw.decode(part.get_content_charset() or "utf-8", errors="replace")
+        if raw
+        else str(part.get_payload())
+    )
+    try:
+        return parse_ics(text)
+    except (TypeError, ValueError):
+        return []
+
+
+def _invite_summary(events: list[dict[str, Any]]) -> str:
+    """Describe invites the way the reader resolves times: ISO date, wall clock and duration."""
+    lines: list[str] = []
+    for event in events[:3]:
+        try:
+            start = datetime.fromisoformat(str(event["start_utc"]))
+            end = datetime.fromisoformat(str(event["end_utc"]))
+        except (KeyError, ValueError):
+            continue
+        minutes = int((end - start).total_seconds() // 60) or 30
+        utc = start.astimezone(timezone.utc)
+        lines.append(
+            f"Calendar invite: {event.get('title') or 'Meeting'} on {utc:%Y-%m-%d} "
+            f"at {utc:%H:%M} UTC for {minutes} minutes."
+        )
+    return "\n".join(lines)
+
+
 class Ingest:
     def __init__(self, settings: Settings, store: StateStore | None = None):
         self.settings = settings
@@ -169,10 +209,13 @@ class Ingest:
         body = ""
         html = ""
         hidden = False
+        calendar_events: list[dict[str, Any]] = []
         if message.is_multipart():
             for part in message.walk():
                 content_type = part.get_content_type()
-                if content_type == "text/plain" and not body:
+                if _is_calendar_part(part):
+                    calendar_events.extend(_calendar_events(part))
+                elif content_type == "text/plain" and not body:
                     body = part.get_content()
                 elif content_type == "text/html" and not html:
                     html = part.get_content()
@@ -184,6 +227,9 @@ class Ingest:
         if html:
             text, hidden = html_to_text(html)
             body = body or text
+        invite = _invite_summary(calendar_events)
+        if invite:
+            body = f"{body}\n\n{invite}" if body.strip() else invite
 
         message_id = headers.get("message-id", "").strip("<> ") or hashlib.sha256(raw).hexdigest()[:24]
         references = headers.get("references", "")
@@ -214,6 +260,8 @@ class Ingest:
         envelope.header_flags = _header_flags(
             headers, envelope.from_addr, self.settings.prefs.owner_email, body, hidden
         )
+        if calendar_events:
+            envelope.header_flags.append("ics_attachment")
         return envelope
 
     def _finalize(self, envelope: EmailEnvelope) -> EmailEnvelope:

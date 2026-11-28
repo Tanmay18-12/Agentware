@@ -77,6 +77,9 @@ class StateStore:
                 CREATE TABLE IF NOT EXISTS thread_state (
                     thread_id TEXT PRIMARY KEY, run_id TEXT, status TEXT, payload TEXT, updated_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS watch_cursor (
+                    name TEXT PRIMARY KEY, cursor TEXT, updated_at TEXT
+                );
                 """
             )
 
@@ -218,6 +221,29 @@ class StateStore:
                 return True
             except sqlite3.IntegrityError:
                 return False
+
+    def forget_seen(self, message_id: str) -> None:
+        """Undo a dedupe mark so a run that failed before acting can be retried."""
+        with self._lock, self.conn:
+            self.conn.execute("DELETE FROM seen_messages WHERE message_id = ?", (message_id,))
+
+    # -- watch cursor --------------------------------------------------
+    def watch_cursor(self, name: str) -> str | None:
+        """Last provider handle a watch loop finished, or None before its first pass."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT cursor FROM watch_cursor WHERE name = ?", (name,)
+            ).fetchone()
+        return row["cursor"] if row else None
+
+    def set_watch_cursor(self, name: str, cursor: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO watch_cursor (name, cursor, updated_at) VALUES (?,?,?) "
+                "ON CONFLICT(name) DO UPDATE SET cursor = excluded.cursor, "
+                "updated_at = excluded.updated_at",
+                (name, cursor, now_iso()),
+            )
 
     # -- counters ------------------------------------------------------
     def hit(self, name: str, at: float | None = None) -> None:

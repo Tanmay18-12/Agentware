@@ -64,6 +64,40 @@ INJECTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# USD per 1M tokens as ``(input, output)``. Prices are provider data: keep this table in step
+# with https://openai.com/api/pricing when a model is added or repriced.
+MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.00),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1": (2.00, 8.00),
+    "o4-mini": (1.10, 4.40),
+}
+DEFAULT_PRICING = MODEL_PRICING["gpt-4o-mini"]
+
+
+def model_pricing(model: str) -> tuple[float, float]:
+    """(input, output) USD per 1M tokens for ``model``; the longest known prefix wins."""
+    name = model.strip().lower().rsplit("/", 1)[-1]
+    for key in sorted(MODEL_PRICING, key=len, reverse=True):
+        if name.startswith(key):
+            return MODEL_PRICING[key]
+    return DEFAULT_PRICING
+
+
+def estimate_cost(
+    model: str, prompt_tokens: int, completion_tokens: int, total_tokens: int
+) -> float:
+    """Cost of one live call from the provider's own usage numbers."""
+    input_price, output_price = model_pricing(model)
+    if prompt_tokens or completion_tokens:
+        cost = (prompt_tokens * input_price + completion_tokens * output_price) / 1_000_000
+    else:
+        # A provider that reports only a total: charge every token at the input rate.
+        cost = total_tokens * input_price / 1_000_000
+    return round(cost, 6)
+
+
 
 class ReaderUnavailable(RuntimeError):
     """Live mode requested without a usable model configuration."""
@@ -149,7 +183,7 @@ class ReaderLLM:
                 ),
             },
         ]
-        tokens = 0
+        tokens = prompt_tokens = completion_tokens = 0
         async with httpx.AsyncClient(timeout=20.0) as client:
             for attempt in range(2):
                 response = await client.post(
@@ -164,7 +198,11 @@ class ReaderLLM:
                 )
                 response.raise_for_status()
                 body = response.json()
-                tokens += int(body.get("usage", {}).get("total_tokens", 0) or 0)
+                usage = body.get("usage") or {}
+                total = int(usage.get("total_tokens", 0) or 0)
+                tokens += total
+                prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
+                completion_tokens += int(usage.get("completion_tokens", 0) or 0)
                 content = body["choices"][0]["message"]["content"]
                 try:
                     intent = MeetingIntent.model_validate(json.loads(content))
@@ -173,7 +211,9 @@ class ReaderLLM:
                         mode="live",
                         model=model,
                         tokens=tokens,
-                        cost_usd=round(tokens / 1_000_000 * 0.15, 6),
+                        cost_usd=estimate_cost(
+                            model, prompt_tokens, completion_tokens, tokens
+                        ),
                         repaired=attempt > 0,
                     )
                 except (json.JSONDecodeError, ValidationError) as error:

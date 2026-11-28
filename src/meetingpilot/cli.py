@@ -38,6 +38,13 @@ class Services:
     kill: KillSwitch
     orchestrator: Orchestrator
 
+    async def aclose(self) -> None:
+        """Release pooled provider clients; mock providers have nothing to close."""
+        for provider in (self.mail, self.calendar):
+            close = getattr(provider, "aclose", None)
+            if close is not None:
+                await close()
+
 
 def build_services(settings: Settings | None = None) -> Services:
     settings = settings or Settings.from_env()
@@ -194,34 +201,85 @@ def cmd_watch(args: argparse.Namespace, settings: Settings) -> int:
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\nstopped")
+    finally:
+        asyncio.run(services.aclose())
     return 0
+
+
+WATCH_BATCH = 50
+
+
+def _watch_once(services: Services) -> int:
+    """Poll the provider once and handle every message after the stored cursor.
+
+    The cursor is a provider handle, advanced only past a message that was handled or is
+    permanently unusable, so a poll that fails mid-run retries that message instead of losing it.
+    """
+
+    settings = services.settings
+    store = services.bus.store
+    ingest = Ingest(settings, store)
+    mailbox = settings.imap_mailbox if settings.mail_provider == "imap" else "inbox"
+    name = f"{settings.mail_provider}:{mailbox}"
+    cursor = store.watch_cursor(name)
+
+    def advance(handle: str) -> None:
+        nonlocal cursor
+        cursor = handle
+        store.set_watch_cursor(name, handle)
+
+    handled = 0
+    for item in asyncio.run(services.mail.list_new(limit=WATCH_BATCH, cursor=cursor)):  # type: ignore[attr-defined]
+        handle = str(item.get("id") or item.get("path") or item.get("name") or "")
+        if not handle:
+            continue
+        try:
+            record = asyncio.run(services.mail.read(handle))  # type: ignore[attr-defined]
+        except Exception as error:  # noqa: BLE001 - a provider hiccup must not kill the loop
+            print(f"retrying {handle} next poll: {error}", file=sys.stderr)
+            break
+        if not record:
+            # Gone from the provider: there is nothing to retry.
+            advance(handle)
+            continue
+        try:
+            envelope = ingest.from_raw(str(record["raw"]).encode())
+        except DuplicateMessage:
+            advance(handle)
+            continue
+        except (MalformedMessage, ValueError) as error:
+            print(f"skipping {handle}: {error}", file=sys.stderr)
+            advance(handle)
+            continue
+        try:
+            summary = asyncio.run(services.orchestrator.handle(envelope))
+        except Exception as error:  # noqa: BLE001 - keep the message for the next poll
+            store.forget_seen(envelope.message_id)
+            print(f"retrying {handle} next poll: {error}", file=sys.stderr)
+            break
+        handled += 1
+        print(
+            f"{handle:<16} → {summary.outcome:<18} decision={summary.decision} "
+            f"run={summary.run_id}"
+        )
+        advance(handle)
+    return handled
 
 
 def _watch_provider(args: argparse.Namespace, services: Services) -> int:
     settings = services.settings
-    ingest = Ingest(settings, services.bus.store)
     print(f"polling {settings.mail_provider} every {args.interval}s (ctrl-c to stop)")
     try:
         while True:
-            for item in asyncio.run(services.mail.list_new(limit=10)):  # type: ignore[attr-defined]
-                record = asyncio.run(services.mail.read(item["id"]))  # type: ignore[attr-defined]
-                if not record:
-                    continue
-                try:
-                    envelope = ingest.from_raw(str(record["raw"]).encode())
-                except DuplicateMessage:
-                    continue
-                except (MalformedMessage, ValueError) as error:
-                    print(f"skipping {item['id']}: {error}", file=sys.stderr)
-                    continue
-                summary = asyncio.run(services.orchestrator.handle(envelope))
-                print(
-                    f"{item['id']:<16} → {summary.outcome:<18} decision={summary.decision} "
-                    f"run={summary.run_id}"
-                )
+            try:
+                _watch_once(services)
+            except Exception as error:  # noqa: BLE001 - an outage is not a reason to exit
+                print(f"poll failed: {error}", file=sys.stderr)
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\nstopped")
+    finally:
+        asyncio.run(services.aclose())
     return 0
 
 

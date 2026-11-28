@@ -16,6 +16,7 @@ from email.message import EmailMessage
 from email.utils import format_datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Iterator
+from urllib.parse import parse_qs, urlparse
 from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
@@ -649,6 +650,15 @@ def test_imap_lists_and_reads_messages(imap):
     assert "10:00 IST" in record["raw"]
 
 
+def test_imap_cursor_returns_only_newer_uids(imap):
+    _settings_obj, mail, _fake, _sent = imap
+
+    items = asyncio.run(mail.list_new(limit=10, cursor="1"))
+
+    assert [item["id"] for item in items] == ["2"]
+    assert asyncio.run(mail.list_new(limit=10))[0]["id"] == "1"
+
+
 def test_imap_draft_is_appended_to_drafts(imap):
     _settings_obj, mail, fake, _sent = imap
     draft = asyncio.run(mail.draft_reply("thread-real", "dana@company.com", "Re: sync", "hello"))
@@ -749,7 +759,11 @@ class _MailpitHandler(BaseHTTPRequestHandler):
             stub.fail_next -= 1
             self._reply(503, b"{}")
             return
-        if self.path == "/api/v1/messages":
+        if self.path == "/api/v1/messages" or self.path.startswith("/api/v1/messages?"):
+            query = parse_qs(urlparse(self.path).query)
+            start = int(query.get("start", ["0"])[0])
+            limit = int(query.get("limit", [str(len(stub.messages))])[0])
+            window = stub.messages[start : start + limit]
             payload = {
                 "messages": [
                     {
@@ -759,7 +773,7 @@ class _MailpitHandler(BaseHTTPRequestHandler):
                         "From": {"Name": "Dana", "Address": "dana@company.com"},
                         "Size": len(message["raw"]),
                     }
-                    for message in stub.messages
+                    for message in window
                 ]
             }
             self._reply(200, json.dumps(payload).encode())
@@ -819,6 +833,22 @@ def test_mailpit_lists_and_reads_over_rest(mailpit):
     # Mailpit's own message ID is also a valid handle (list_new hands it out).
     by_id = asyncio.run(mail.read("1"))
     assert by_id is not None and "10:00 IST" in by_id["raw"]
+
+
+def test_mailpit_cursor_drains_backwards_from_the_newest_page(mailpit):
+    stub, _settings, mail = mailpit
+    stub.messages = [
+        {"ID": "3", "MessageID": "third@dana.test", "Subject": "Third", "raw": ""},
+        {"ID": "2", "MessageID": "second@dana.test", "Subject": "Second", "raw": ""},
+        {"ID": "1", "MessageID": "first@dana.test", "Subject": "First", "raw": ""},
+    ]
+
+    first_page = asyncio.run(mail.list_new(limit=1, cursor="0"))
+    assert [item["id"] for item in first_page] == ["1"]
+
+    rest = asyncio.run(mail.list_new(limit=10, cursor=first_page[0]["id"]))
+    assert [item["id"] for item in rest] == ["2", "3"]
+    assert any("start=" in path for path in stub.requests)
 
 
 def test_mailpit_sends_over_smtp(mailpit):
