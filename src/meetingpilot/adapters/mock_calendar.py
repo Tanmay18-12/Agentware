@@ -149,9 +149,15 @@ class MockCalendar:
             return {"ok": False, "reason": "not_agent_owned"}
         with self._lock, self.conn:
             self.conn.execute(
-                "UPDATE events SET start_utc = ?, end_utc = ?, attendees = ?, status = 'confirmed'"
-                " WHERE id = ?",
-                (_iso(_parse(start_utc)), _iso(_parse(end_utc)), json.dumps(attendees), event_id),
+                "UPDATE events SET start_utc = ?, end_utc = ?, attendees = ?, status = 'confirmed',"
+                " agent_tag = ? WHERE id = ?",
+                (
+                    _iso(_parse(start_utc)),
+                    _iso(_parse(end_utc)),
+                    json.dumps(attendees),
+                    agent_tag,
+                    event_id,
+                ),
             )
         return {
             "ok": True,

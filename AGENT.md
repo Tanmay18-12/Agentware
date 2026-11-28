@@ -10,7 +10,7 @@ side effect.
    email text. It has zero tools and must return a `MeetingIntent` that validates against a strict
    Pydantic model (`extra='forbid'`). Every timestamp, slot and action is computed by Python.
 2. **One choke point.** `Orchestrator` never imports a provider. Every side effect becomes an
-   `ActionRequest` evaluated by `PolicyGateway.execute()` (`policy_gateway.py:141`).
+   `ActionRequest` evaluated by `PolicyGateway.execute()` (`policy_gateway.py:140`).
 3. **Fail closed.** Exception, schema failure, low confidence, ambiguity or a blocked action ends in
    `ESCALATE` (draft + queue) or `QUARANTINE` (no actions) — never "proceed anyway".
 4. **Offline first.** `MOCK_MODE=1`, `LLM_MODE=cassette` are the defaults; no API key and no network
@@ -74,13 +74,13 @@ violations. `PX` (documented extension) marks a provider failure that was failed
 | Failure | Behaviour | Evidence |
 |---|---|---|
 | Malformed email / oversize body | QUARANTINE, run still recorded | `pipeline/ingest.py`, trap pack |
-| Prompt injection (hidden, visible, zero-width) | QUARANTINE at stage 3, zero tool calls | `pipeline/screen.py:66` |
-| Spoofed From / Reply-To / SPF / DKIM | QUARANTINE (score ≥ 0.5) or ESCALATE | `policy_gateway.py:301` |
-| Low confidence / ambiguous time / DST gap | CLARIFY with one question | `pipeline/validator.py:86` |
-| Provider 429 / 500 / timeout | 3 attempts with backoff, then BLOCK → ESCALATE | `policy_gateway.py:141` |
-| Concurrent booking (check-then-act race) | cancel own hold, retry next candidate (max 2) | `orchestrator.py:499` |
-| Post-commit mismatch | cancel own event, mark `COMPENSATED` | `orchestrator.py:791` |
-| Kill switch mid-run | tasks cancelled, pending work halted, `HALTED` summary | `kill_switch.py:88` |
+| Prompt injection (hidden, visible, zero-width) | QUARANTINE at stage 3, zero tool calls | `pipeline/screen.py:111` |
+| Spoofed From / Reply-To / SPF / DKIM | QUARANTINE (score ≥ 0.5) or ESCALATE | `policy_gateway.py:300` |
+| Low confidence / ambiguous time / DST gap | CLARIFY with one question | `pipeline/validator.py:119` |
+| Provider 429 / 500 / timeout | 3 attempts with backoff, then BLOCK → ESCALATE | `policy_gateway.py:140` |
+| Concurrent booking (check-then-act race) | cancel own hold, retry next candidate (max 2) | `orchestrator.py:525` |
+| Post-commit mismatch | cancel own event, mark `COMPENSATED` | `orchestrator.py:788` |
+| Kill switch mid-run | tasks cancelled, pending work halted, `HALTED` summary | `kill_switch.py:85` |
 | Duplicate delivery | exactly-once effects via P7 + Message-ID dedupe | `event_bus.py`, `test_replay_and_audit.py` |
 
 ## Data model
@@ -94,6 +94,6 @@ violations. `PX` (documented extension) marks a provider failure that was failed
 ```bash
 uv sync --extra dev
 make demo        # seed + 7 end-to-end runs, offline
-make test        # 68 tests including the 32-case trap pack
+make test        # 116 tests including the 32-case trap pack (also runs in CI)
 make serve       # http://127.0.0.1:8000
 ```

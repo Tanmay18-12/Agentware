@@ -17,6 +17,15 @@ from .mock_mail import MockMail
 from .smtp_mail import SmtpSender
 
 
+def _header_message_id(raw: str) -> str:
+    """Extract the RFC 5322 ``Message-ID`` from a raw message, without the angle brackets."""
+    head = raw.replace("\r\n", "\n").split("\n\n", 1)[0]
+    for line in head.split("\n"):
+        if line.lower().startswith("message-id:"):
+            return line.split(":", 1)[1].strip().strip("<>")
+    return ""
+
+
 class MailpitMail:
     def __init__(self, settings: Settings, *, smtp_factory: Any | None = None):
         self.settings = settings
@@ -83,7 +92,10 @@ class MailpitMail:
             return None
         if response.status_code != 200:
             self._fail(response, "read message")
-        return {"id": handle, "message_id": handle, "raw": response.text}
+        # Report the RFC 5322 Message-ID like the IMAP adapter: dedupe keys on it, not on the
+        # provider's internal handle.
+        rfc_id = _header_message_id(response.text)
+        return {"id": handle, "message_id": rfc_id or handle, "raw": response.text}
 
     # -- write side ----------------------------------------------------
     async def draft_reply(self, thread_id: str, to: str, subject: str, body: str) -> dict[str, Any]:

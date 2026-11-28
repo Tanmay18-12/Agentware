@@ -48,8 +48,9 @@ Intended user: a single calendar owner (demo persona `owner@example.com`, timezo
 - Gmail / Google Calendar **OAuth** adapters (plan COULD tier) — use IMAP/CalDAV instead.
 - Rescheduling or cancelling events the agent did not create (deliberate: always escalated).
 - Attachment parsing (only "ignore non-`.ics`" exists), multi-user/shared calendars, i18n.
-- CalDAV recurring events (`RRULE`/`EXDATE`) are read as their first occurrence only (single events
-  with `TZID`/`DURATION` are decoded correctly, including a real-Radicale check).
+- CalDAV recurrence is expanded for free/busy (DAILY/WEEKLY/MONTHLY/YEARLY with `INTERVAL`, `COUNT`,
+  `UNTIL`, `BYDAY` and `EXDATE`); `BYSETPOS`/`BYMONTHDAY` and per-observance `VTIMEZONE` selection are
+  not implemented, and `list_events` keeps one row per series.
 - Live LLM calls against a real provider were never executed (only a loopback stub test).
 
 ## 2. Technology stack
@@ -281,8 +282,9 @@ events; 15-minute grid; cassette replay.
 
 See `PROJECT_STATUS.md` for severity and reproduction. Headlines:
 
-- CalDAV expands no recurrence rules: `RRULE` series appear once (first occurrence). `TZID` and
-  `DURATION` for single events are supported.
+- CalDAV expands DAILY/WEEKLY/MONTHLY/YEARLY recurrences with `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY`
+  and `EXDATE` for free/busy; `BYSETPOS`/`BYMONTHDAY` are unsupported and `list_events` shows the
+  series once. `TZID` and `DURATION` are decoded for single events.
 - Dashboard reads the active mail/calendar providers for inbox/drafts/calendar; Outbox remains the
   adapters' local `.eml` send mirror. The page has no browser-level test.
 - No auth/TLS on the dashboard; single owner, single process, SQLite, in-process kill switch.

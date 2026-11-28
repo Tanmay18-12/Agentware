@@ -173,6 +173,7 @@ class Settings:
     config_path: Path = field(default_factory=lambda: Path("config/prefs.yaml"))
     host: str = "127.0.0.1"
     port: int = 8000
+    dashboard_token: str = ""
     mail_provider: str = "mock"
     calendar_provider: str = "mock"
     # IMAP / SMTP (mail_provider=imap)
@@ -229,6 +230,7 @@ class Settings:
             config_path=config_path,
             host=str(merged.get("HOST", "127.0.0.1")),
             port=int(merged.get("PORT", "8000")),
+            dashboard_token=str(merged.get("DASHBOARD_TOKEN", "")).strip(),
             mail_provider=str(merged.get("MAIL_PROVIDER", "mock")).strip().lower(),
             calendar_provider=str(merged.get("CALENDAR_PROVIDER", "mock")).strip().lower(),
             imap_host=str(merged.get("IMAP_HOST", "127.0.0.1")),
