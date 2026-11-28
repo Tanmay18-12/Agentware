@@ -26,7 +26,11 @@ class MalformedPayload(ProviderError):
 
 
 class MailProvider(Protocol):
-    async def list_new(self, mailbox: str = "inbox", limit: int = 10) -> list[dict[str, Any]]: ...
+    async def list_new(
+        self, mailbox: str = "inbox", limit: int = 10, cursor: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Newest ``limit`` messages, or — with ``cursor`` — those after it, oldest first."""
+        ...
 
     async def read(self, message_id: str) -> dict[str, Any] | None: ...
 

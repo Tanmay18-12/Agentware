@@ -38,7 +38,7 @@ Repository state: `main` at `9fff857`, no tagged release. CI lives in
 | IMAP/SMTP adapter | IMPLEMENTED BUT UNVERIFIED (real server) | `adapters/imap_mail.py`, `smtp_mail.py` | fake IMAP/SMTP transport tests only |
 | CalDAV adapter | COMPLETE (verified real) | `adapters/caldav_calendar.py` | Radicale hold/confirm/cancel/freebusy + PROPOSE; foreign `TZID`/`DURATION` decoded; `RRULE`/`EXDATE` expanded for free/busy; failed collections are re-probed |
 | Fault injection + fail-closed retries | COMPLETE | `adapters/fault_injector.py`, `policy_gateway.py:230-300` | 429/503/malformed/partial tests |
-| Real-provider `watch` loop | IMPLEMENTED, UNVERIFIED | `cli.py:200-226` | never run as a loop |
+| Real-provider `watch` loop | IMPLEMENTED, UNVERIFIED (real server) | `cli.py` | resumes from a persisted provider cursor (`watch_cursor`), retries the message a failed run touched, survives a failed poll; fake-transport coverage only |
 | Trap Pack | COMPLETE | `tests/trap_pack/` | 32/32 pass, report regenerated |
 | Gmail / Google Calendar OAuth | NOT IMPLEMENTED | — | plan COULD; use IMAP/CalDAV |
 | Reschedule/cancel of existing events | NOT IMPLEMENTED (by design) | `orchestrator.py:398-410` | always ESCALATE |
@@ -146,11 +146,11 @@ concurrent clients this can block the event loop. Local-only today.
 
 ## 5. Test coverage
 
-Current: **141 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
-scheduler/DST/validator 19, kill switch 4, replay/audit 6, live reader 8, real adapters 27
+Current: **147 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
+scheduler/DST/validator 19, kill switch 4, replay/audit 6, live reader 8, real adapters 29
 (incl. the TZID/DURATION and ambiguity regressions), approvals 3, dashboard 5, prefilter 2, concurrency 1, trap pack 33
 (32 cases + report), caldav recurrence 10, adapter regressions 4, adapter pooling 4, ics ingest 4,
-plus helpers.
+watch cursor 4, plus helpers.
 
 Missing coverage, in priority order:
 
@@ -158,7 +158,8 @@ Missing coverage, in priority order:
 - CalDAV `BYSETPOS`/`BYMONTHDAY` rules (the common shapes are covered by `tests/test_caldav_recurrence.py`).
 - `Orchestrator.approve()` and `/api/approve|reject` end-to-end.
 - Dashboard `_state`, SSE disconnect behaviour, `/api/inject` error paths.
-- Real IMAP server (Dovecot/GreenMail) integration.
+- Real IMAP server (Dovecot/GreenMail) integration, and a `watch` loop over one.
+- Mailpit backlog larger than `_MAX_SCAN` (2000 messages) in one poll window.
 - Real LLM provider request/response.
 - Kill switch during a *provider* call with real adapters.
 - Post-commit `COMPENSATED` path.
@@ -179,8 +180,7 @@ Missing coverage, in priority order:
 | Dashboard unauthenticated, loopback | `config.host`, `server.py` | inferred (local demo scope) |
 
 Open decisions: whether CalDAV must support third-party client events (recommended yes); whether the
-dashboard should require a token even on loopback; whether to persist provider cursor/state for
-`watch`.
+dashboard should require a token even on loopback.
 
 ## 7. Prioritized roadmap
 
@@ -201,7 +201,8 @@ both with regression tests.)*
 3. Structured logging with run/step IDs; keep JSONL as the audit source of truth.
 4. *(Done 2026-11-28: atomic event sequence allocation — BUG-09 — and connection/HTTP pooling
    — BUG-10.)*
-5. Provider cursor/`processed` state for `watch` so more than the latest N messages are handled.
+5. *(Done 2026-11-28: `watch` persists a per-provider cursor, drains the backlog after it and
+   retries a message whose run failed — `tests/test_watch_cursor.py`.)*
 6. *(Done 2026-11-28: `text/calendar` attachments are parsed and described to the reader —
    `tests/test_ingest_ics.py`.)*
 7. Clean up test temp dirs (BUG-13), `.env.example` (BUG-12).

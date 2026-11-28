@@ -21,13 +21,19 @@ class MockMail:
         settings.ensure_dirs()
 
     # -- read side -----------------------------------------------------
-    async def list_new(self, mailbox: str = "inbox", limit: int = 10) -> list[dict[str, Any]]:
+    async def list_new(
+        self, mailbox: str = "inbox", limit: int = 10, cursor: str | None = None
+    ) -> list[dict[str, Any]]:
         folder = self.settings.inbox_dir if mailbox == "inbox" else self.settings.drafts_dir
         items = []
         for path in sorted(folder.glob("*")):
             if path.suffix.lower() not in {".json", ".eml", ".txt"}:
                 continue
             items.append({"path": str(path), "name": path.name, "size_bytes": path.stat().st_size})
+        if cursor is not None:
+            paths = [item["path"] for item in items]
+            if cursor in paths:
+                items = items[paths.index(cursor) + 1 :]
         return items[:limit]
 
     async def read(self, message_id: str) -> dict[str, Any] | None:
