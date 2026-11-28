@@ -36,7 +36,7 @@ Repository state: `main` at `9fff857`, no tagged release. CI lives in
 | Mock mail/calendar adapters | COMPLETE | `adapters/mock_*.py` | demo + tests |
 | Mailpit adapter | COMPLETE (verified real) | `adapters/mailpit_mail.py` | read + SMTP reply + PROPOSE confirmed against Mailpit v1.34.0 |
 | IMAP/SMTP adapter | IMPLEMENTED BUT UNVERIFIED (real server) | `adapters/imap_mail.py`, `smtp_mail.py` | fake IMAP/SMTP transport tests only |
-| CalDAV adapter | COMPLETE for single events (verified real) | `adapters/caldav_calendar.py` | Radicale hold/confirm/cancel/freebusy + PROPOSE; foreign `TZID`/`DURATION` decoded; `RRULE` = first occurrence |
+| CalDAV adapter | COMPLETE (verified real) | `adapters/caldav_calendar.py` | Radicale hold/confirm/cancel/freebusy + PROPOSE; foreign `TZID`/`DURATION` decoded; `RRULE`/`EXDATE` expanded for free/busy; failed collections are re-probed |
 | Fault injection + fail-closed retries | COMPLETE | `adapters/fault_injector.py`, `policy_gateway.py:230-300` | 429/503/malformed/partial tests |
 | Real-provider `watch` loop | IMPLEMENTED, UNVERIFIED | `cli.py:200-226` | never run as a loop |
 | Trap Pack | COMPLETE | `tests/trap_pack/` | 32/32 pass, report regenerated |
@@ -44,7 +44,7 @@ Repository state: `main` at `9fff857`, no tagged release. CI lives in
 | Reschedule/cancel of existing events | NOT IMPLEMENTED (by design) | `orchestrator.py:398-410` | always ESCALATE |
 | Attachment parsing (.ics invites) | NOT IMPLEMENTED | `pipeline/ingest.py` | non-`.ics` ignored |
 | Multi-user / shared calendars | NOT IMPLEMENTED | — | single owner |
-| Recurring events (`RRULE`/`EXDATE`) | NOT IMPLEMENTED | `caldav_calendar.py` | read as the first occurrence (documented limit) |
+| Recurring events (`RRULE`/`EXDATE`) | IMPLEMENTED for free/busy | `caldav_calendar.py` | DAILY/WEEKLY/MONTHLY/YEARLY with `INTERVAL`/`COUNT`/`UNTIL`/`BYDAY` + `EXDATE`; `BYSETPOS`/`BYMONTHDAY` unsupported; `list_events` lists the series once |
 
 ## 3. Known bugs and risks
 
@@ -110,8 +110,8 @@ concurrent clients this can block the event loop. Local-only today.
 |---|---|---|
 | BUG-05 | FIXED 2026-11-28: a rate-limited sender recorded an extra hit per dropped message, extending its own block; only accepted mail is counted now | `pipeline/prefilter.py`, `tests/test_prefilter.py` |
 | BUG-06 | FIXED 2026-11-28: invalid `MAIL_PROVIDER`/`CALENDAR_PROVIDER` exits 2 with a one-line message instead of a traceback | `cli.py` `main` |
-| BUG-07 | Mailpit `read()` returns the Mailpit ID as `message_id` (IMAP returns the RFC Message-ID) | `adapters/mailpit_mail.py:69-84` |
-| BUG-08 | CalDAV `_ready` is cached forever; a Radicale restart mid-process yields 409/PUT failures until restart | `adapters/caldav_calendar.py:225-250` |
+| BUG-07 | FIXED 2026-11-28: Mailpit `read()` reports the RFC 5322 `Message-ID` parsed from the raw message (falling back to the handle), matching the IMAP adapter so dedupe keys stay provider-independent | `adapters/mailpit_mail.py`, `tests/test_adapter_regressions.py` |
+| BUG-08 | FIXED 2026-11-28: a 409/410/5xx response now clears `_ready`, so the next call re-runs `MKCALENDAR` instead of failing until process restart | `adapters/caldav_calendar.py`, `tests/test_adapter_regressions.py` |
 | BUG-09 | FIXED 2026-11-28: `EventBus.emit` now allocates `seq`, reads `prev_hash`, inserts and appends under one lock, so concurrent emits cannot collide on `(run_id, seq)` or fork the chain; the index hash is chained under the same lock. Test: `tests/test_event_bus_concurrency.py` (40 threads, fails on the old code) | `event_bus.py` `emit` |
 | BUG-10 | A new `httpx.AsyncClient` is created per request (no pooling) | `caldav_calendar.py:200-208`, `mailpit_mail.py:36-47` |
 | BUG-11 | FIXED 2026-11-28: `AGENT.md` test count (68 → 116) and both docs' `file:line` references recomputed against the current tree; `SAFETY.md`'s corrupted OutputGuard sentence repaired | `AGENT.md`, `SAFETY.md` |
@@ -128,9 +128,9 @@ concurrent clients this can block the event loop. Local-only today.
 
 ## 4. Technical debt
 
-1. **CalDAV scope is a subset of the protocol** (no `RRULE`/`EXDATE`, no discovery, no per-observance
-   VTIMEZONE selection). Single events from other clients are decoded correctly now, but recurring
-   series are still read as their first occurrence.
+1. **CalDAV scope is a subset of the protocol** (no discovery, no per-observance VTIMEZONE selection).
+   Single events from other clients are decoded correctly, and DAILY/WEEKLY/MONTHLY/YEARLY series with
+   `INTERVAL`/`COUNT`/`UNTIL`/`BYDAY`/`EXDATE` now expand; `BYSETPOS`/`BYMONTHDAY` are still ignored.
 2. **Two adapters duplicate local-fallback behaviour** (`MailpitMail` delegates drafts/labels/
    follow-ups to `MockMail`); acceptable but worth documenting as intentional.
 3. **No structured logging** — diagnosis relies on JSONL traces and stdout; operators get no log
@@ -141,19 +141,19 @@ concurrent clients this can block the event loop. Local-only today.
    supervisor/worker split yet.
 6. **Single-run concurrency semantics** — the orchestrator serialises stages per run; the store/bus
    are not designed for many concurrent runs in one process.
-7. **Test coverage gaps** (see §5) — real IMAP/LLM, CalDAV recurrence, browser-level dashboard.
+7. **Test coverage gaps** (see §5) — real IMAP/LLM, browser-level dashboard, `RRULE` edge rules.
 8. **Docs drift** — `AGENT.md`/`SAFETY.md` line numbers and test counts predate the adapter work.
 
 ## 5. Test coverage
 
-Current: **116 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
+Current: **130 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
 scheduler/DST/validator 19, kill switch 4, replay/audit 6, live reader 5, real adapters 27
 (incl. the TZID/DURATION and ambiguity regressions), approvals 3, dashboard 5, prefilter 2, concurrency 1, trap pack 33
-(32 cases + report), plus helpers.
+(32 cases + report), caldav recurrence 10, adapter regressions 4, plus helpers.
 
 Missing coverage, in priority order:
 
-- CalDAV `RRULE`/`EXDATE` expansion (single-event `TZID`/`DURATION` is now covered).
+- CalDAV `BYSETPOS`/`BYMONTHDAY` rules (the common shapes are covered by `tests/test_caldav_recurrence.py`).
 - `Orchestrator.approve()` and `/api/approve|reject` end-to-end.
 - Dashboard `_state`, SSE disconnect behaviour, `/api/inject` error paths.
 - Real IMAP server (Dovecot/GreenMail) integration.
@@ -200,7 +200,7 @@ both with regression tests.)*
 4. *(Done 2026-11-28: atomic event sequence allocation — BUG-09.)* Optional connection/HTTP
    pooling (BUG-10) remains.
 5. Provider cursor/`processed` state for `watch` so more than the latest N messages are handled.
-6. RRULE support and ICS attachment parsing.
+6. ICS attachment parsing (`RRULE`/`EXDATE` support landed 2026-11-28).
 7. Clean up test temp dirs (BUG-13), `.env.example` (BUG-12).
 
 ### Priority 4 — future
@@ -215,8 +215,7 @@ both with regression tests.)*
 3. Refresh `AGENT.md`/`SAFETY.md` references and test counts; record the Mailpit/CalDAV verification
    commands in the README (≈30 min).
 4. Add real-IMAP (Dovecot) integration coverage; keep the fake transport as the fast path (≈90 min).
-5. Implement `RRULE`/`EXDATE` expansion for free/busy so recurring series are not collapsed to their
-   first occurrence (≈120 min).
+5. *(Done 2026-11-28: `RRULE`/`EXDATE` expansion for free/busy — `tests/test_caldav_recurrence.py`.)*
 
 ## 9. Things to remember before resuming
 

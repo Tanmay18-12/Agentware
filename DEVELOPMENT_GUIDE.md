@@ -153,10 +153,12 @@ uv run pytest tests/test_scheduler_dst.py -v    # DST + interval math
 | `tests/test_approvals.py` | approval queue: approve books + sends via the gateway, reject sends nothing, approvals survive kill/resume |
 | `tests/test_server.py` | `/api/state` reads mail/calendar providers (not sandbox files); reject endpoint only decides pending approvals; `DASHBOARD_TOKEN` gates `/api/*` + `/events`, non-loopback binds lock down |
 | `tests/test_prefilter.py` | sender rate limit: dropped mail does not extend its own block window |
+| `tests/test_caldav_recurrence.py` | `RRULE`/`EXDATE` expansion: COUNT, INTERVAL, UNTIL, BYDAY, monthly clamping, TZID series, free/busy window filtering |
+| `tests/test_adapter_regressions.py` | Mailpit `Message-ID` parity; a 409 from CalDAV clears the cached collection so it is re-probed |
 | `tests/trap_pack/test_trap_pack.py` | 32 cases → expected decision, no unregistered tool, no quarantine actions, no leaked addresses/titles; writes `trap_pack_report.json` |
 
 Missing coverage (see `PROJECT_STATUS.md`): provider `watch` loop, real IMAP server, real OpenAI,
-CalDAV `RRULE` expansion, browser-level dashboard interaction.
+CalDAV `BYSETPOS`/`BYMONTHDAY` rules, browser-level dashboard interaction.
 
 ## 6. Manual test checklist
 

@@ -6,8 +6,9 @@ never modified or deleted.
 
 Stamps are decoded with their parameters: ``DTSTART;TZID=Asia/Kolkata:...`` is resolved through
 :mod:`zoneinfo` (with a VTIMEZONE offset fallback for non-IANA ids), and ``DURATION`` is honoured
-when ``DTEND`` is absent. ``RRULE`` events are read as their first occurrence only: enough for a
-scheduling agent's free/busy view, not a general-purpose CalDAV client.
+when ``DTEND`` is absent. ``freebusy`` expands ``RRULE``/``EXDATE`` (DAILY/WEEKLY/MONTHLY/YEARLY with
+``INTERVAL``, ``COUNT``, ``UNTIL`` and ``BYDAY``) inside the requested window; ``list_events`` keeps
+one row per series for the dashboard. This is still not a general-purpose CalDAV client.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import re
 import uuid
+from calendar import monthrange
 from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any
 from urllib.parse import quote
@@ -243,6 +245,13 @@ def parse_ics(text: str) -> list[dict[str, Any]]:
             duration = _parse_duration(value)
             if duration is not None:
                 current["duration"] = duration
+        elif key == "RRULE":
+            current["rrule"] = value.strip()
+        elif key == "EXDATE":
+            for token in value.split(","):
+                stamp = _parse_stamp(token, params, offsets)
+                if stamp is not None:
+                    current.setdefault("exdates", []).append(_iso(stamp[0]))
         elif key == "STATUS":
             current["status"] = value.strip().lower()
         elif key == "X-MEETINGPILOT-AGENT":
@@ -265,19 +274,161 @@ def parse_ics(text: str) -> list[dict[str, Any]]:
                 end = start + timedelta(days=1)
             else:
                 end = start
-        out.append(
-            {
-                "event_id": str(item["event_id"]),
-                "id": str(item["event_id"]),
-                "title": str(item.get("title") or "Meeting"),
-                "start_utc": _iso(start),
-                "end_utc": _iso(end),
-                "status": str(item.get("status") or "confirmed"),
-                "agent_tag": str(item.get("agent_tag") or ""),
-                "attendees": list(item.get("attendees") or []),
-            }
-        )
+        row: dict[str, Any] = {
+            "event_id": str(item["event_id"]),
+            "id": str(item["event_id"]),
+            "title": str(item.get("title") or "Meeting"),
+            "start_utc": _iso(start),
+            "end_utc": _iso(end),
+            "status": str(item.get("status") or "confirmed"),
+            "agent_tag": str(item.get("agent_tag") or ""),
+            "attendees": list(item.get("attendees") or []),
+        }
+        # Recurrence metadata has to survive into the rows: expand_events() needs it.
+        if item.get("rrule"):
+            row["rrule"] = item["rrule"]
+        if item.get("exdates"):
+            row["exdates"] = item["exdates"]
+        out.append(row)
     return out
+
+
+_WEEKDAYS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
+_MAX_OCCURRENCES = 400
+_MAX_STEPS = 40000  # bounds a rule with no COUNT/UNTIL (~109 years of days)
+
+
+def _parse_rrule(value: str) -> dict[str, str]:
+    rule: dict[str, str] = {}
+    for chunk in value.split(";"):
+        key, _, raw = chunk.partition("=")
+        if key.strip():
+            rule[key.strip().upper()] = raw.strip()
+    return rule
+
+
+def _add_months(moment: datetime, months: int) -> datetime:
+    month_index = moment.month - 1 + months
+    year = moment.year + month_index // 12
+    month = month_index % 12 + 1
+    # 31 Jan + 1 month is 28/29 Feb, the way every calendar client does it.
+    day = min(moment.day, monthrange(year, month)[1])
+    return moment.replace(year=year, month=month, day=day)
+
+
+def _stepped_starts(start: datetime, freq: str, interval: int):
+    for step in range(_MAX_STEPS):
+        if freq == "DAILY":
+            yield start + timedelta(days=step * interval)
+        elif freq == "MONTHLY":
+            yield _add_months(start, step * interval)
+        else:  # YEARLY
+            yield _add_months(start, 12 * step * interval)
+
+
+def _weekly_starts(start: datetime, interval: int, byday: list[str]):
+    weekdays = sorted(
+        {_WEEKDAYS[token.strip()[-2:]] for token in byday if token.strip()[-2:] in _WEEKDAYS}
+    )
+    if not weekdays:
+        weekdays = [start.weekday()]
+    week_start = start - timedelta(days=start.weekday())
+    for step in range(_MAX_STEPS):
+        base = week_start + timedelta(weeks=step * interval)
+        for weekday in weekdays:
+            candidate = (base + timedelta(days=weekday)).replace(
+                hour=start.hour,
+                minute=start.minute,
+                second=start.second,
+                microsecond=start.microsecond,
+            )
+            if candidate >= start:
+                yield candidate
+
+
+def _occurrence_starts(start: datetime, rule: dict[str, str]):
+    """Yield occurrence starts for one RRULE, honouring COUNT, UNTIL, INTERVAL and BYDAY."""
+    freq = rule.get("FREQ", "").upper()
+    try:
+        interval = max(1, int(rule.get("INTERVAL", "1")))
+    except ValueError:
+        interval = 1
+    count = None
+    if rule.get("COUNT"):
+        try:
+            count = max(0, int(rule["COUNT"]))
+        except ValueError:
+            count = None
+    until = None
+    if rule.get("UNTIL"):
+        try:
+            until = _parse_dt(rule["UNTIL"])
+        except ValueError:
+            until = None
+    byday = [token for token in rule.get("BYDAY", "").split(",") if token.strip()]
+
+    if freq == "WEEKLY":
+        starts = _weekly_starts(start, interval, byday)
+    elif freq in {"DAILY", "MONTHLY", "YEARLY"}:
+        starts = _stepped_starts(start, freq, interval)
+    else:
+        yield start
+        return
+
+    emitted = 0
+    for occurrence in starts:
+        if until is not None and occurrence > until:
+            return
+        yield occurrence
+        emitted += 1
+        if count is not None and emitted >= count:
+            return
+
+
+def expand_events(
+    events: list[dict[str, Any]],
+    range_start: datetime,
+    range_end: datetime,
+    *,
+    cap: int = _MAX_OCCURRENCES,
+) -> list[dict[str, Any]]:
+    """Expand recurring events into the occurrences overlapping ``[range_start, range_end)``.
+
+    Non-recurring events pass through unchanged. Occurrences keep the series' ``event_id``
+    (free/busy only needs the interval) and carry ``recurrence_id`` so a trace can name one.
+    """
+    expanded: list[dict[str, Any]] = []
+    for event in events:
+        start = _as_dt(event["start_utc"])
+        end = _as_dt(event["end_utc"])
+        duration = end - start
+        rule = _parse_rrule(str(event.get("rrule") or ""))
+        if not rule:
+            if start < range_end and end > range_start:
+                expanded.append(event)
+            continue
+        excluded = {_as_dt(stamp).astimezone(timezone.utc) for stamp in event.get("exdates") or []}
+        emitted = 0
+        for occurrence_start in _occurrence_starts(start, rule):
+            if occurrence_start >= range_end:
+                break
+            occurrence_end = occurrence_start + duration
+            if occurrence_end <= range_start:
+                continue
+            if occurrence_start.astimezone(timezone.utc) in excluded:
+                continue
+            expanded.append(
+                {
+                    **event,
+                    "start_utc": _iso(occurrence_start),
+                    "end_utc": _iso(occurrence_end),
+                    "recurrence_id": _iso(occurrence_start),
+                }
+            )
+            emitted += 1
+            if emitted >= cap:
+                break
+    return expanded
 
 
 def render_ics(
@@ -374,30 +525,37 @@ class CalDavCalendar:
                     self._fail(created, "MKCALENDAR")
                 self._ready = True
             try:
-                return await client.request(method, url, content=content, headers=headers)
+                response = await client.request(method, url, content=content, headers=headers)
             except httpx.TimeoutException as error:
                 raise ProviderTimeout(f"caldav {method} timed out: {error}") from error
             except httpx.HTTPError as error:
                 raise ProviderError(f"caldav {method} failed: {error}") from error
+        self._note_response(response)
+        return response
+
+    def _note_response(self, response: httpx.Response) -> None:
+        """Re-probe the collection next time when it vanished (Radicale restart, fresh volume)."""
+        if response.status_code in {409, 410} or response.status_code >= 500:
+            self._ready = False
 
     # -- reads ---------------------------------------------------------
     async def freebusy(self, start_utc: str, end_utc: str) -> list[dict[str, Any]]:
-        events = await self._report(start_utc, end_utc)
         start, end = _as_dt(start_utc), _as_dt(end_utc)
+        # Recurring series are expanded here: the REPORT only returns each series once.
+        events = expand_events(await self._report(start_utc, end_utc), start, end)
         busy: list[dict[str, Any]] = []
         for event in events:
             if event["status"] == "cancelled":
                 continue
-            if _as_dt(event["start_utc"]) < end and _as_dt(event["end_utc"]) > start:
-                busy.append(
-                    {
-                        "event_id": event["event_id"],
-                        "start_utc": event["start_utc"],
-                        "end_utc": event["end_utc"],
-                        "status": event["status"],
-                        "agent_tag": event["agent_tag"],
-                    }
-                )
+            busy.append(
+                {
+                    "event_id": event["event_id"],
+                    "start_utc": event["start_utc"],
+                    "end_utc": event["end_utc"],
+                    "status": event["status"],
+                    "agent_tag": event["agent_tag"],
+                }
+            )
         return busy
 
     async def _report(self, start_utc: str, end_utc: str) -> list[dict[str, Any]]:

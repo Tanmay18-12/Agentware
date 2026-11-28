@@ -120,7 +120,9 @@ curl -u owner:owner -X PUT http://127.0.0.1:5232/owner/meetingpilot/busy.ics \
 
 - Mock remains the default. Real adapters are IMAP/SMTP, Mailpit's REST API and CalDAV; Gmail and
   Google Calendar OAuth are not implemented (use an IMAP/CalDAV bridge if you need them).
-- The CalDAV reader ignores `RRULE`/`EXDATE`: recurring events count as their first occurrence.
+- The CalDAV reader expands `RRULE`/`EXDATE` for free/busy (DAILY/WEEKLY/MONTHLY/YEARLY, `INTERVAL`,
+  `COUNT`, `UNTIL`, `BYDAY`); `BYSETPOS`/`BYMONTHDAY` are not implemented, and the dashboard still
+  lists one row per series.
 - Follow-ups always go to `sandbox/followups.jsonl`; Mailpit has no folders, so its drafts and
   labels are local files too. IMAP labels are folder **copies**, never moves or deletes.
 - Only non-`.ics` attachments are ignored, not parsed.
