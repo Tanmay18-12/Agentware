@@ -32,6 +32,7 @@ class MailpitMail:
         self.sender = SmtpSender(settings, smtp_factory)
         self._local = MockMail(settings)
         self._base = settings.mailpit_url.rstrip("/")
+        self._http: httpx.AsyncClient | None = None
 
     # -- HTTP ----------------------------------------------------------
     def _fail(self, response: httpx.Response, action: str) -> None:
@@ -42,13 +43,23 @@ class MailpitMail:
             raise ServerError(detail)
         raise ProviderError(detail)
 
+    def _http_client(self) -> httpx.AsyncClient:
+        """One pooled client per adapter, so TCP connections survive between polls."""
+        if self._http is None or self._http.is_closed:
+            kwargs: dict[str, Any] = {"timeout": self.settings.mailpit_timeout_s}
+            if self.settings.mailpit_user:
+                kwargs["auth"] = (self.settings.mailpit_user, self.settings.mailpit_password)
+            self._http = httpx.AsyncClient(**kwargs)
+        return self._http
+
+    async def aclose(self) -> None:
+        client, self._http = self._http, None
+        if client is not None:
+            await client.aclose()
+
     async def _get(self, path: str) -> httpx.Response:
-        kwargs: dict[str, Any] = {"timeout": self.settings.mailpit_timeout_s}
-        if self.settings.mailpit_user:
-            kwargs["auth"] = (self.settings.mailpit_user, self.settings.mailpit_password)
         try:
-            async with httpx.AsyncClient(**kwargs) as client:
-                return await client.get(f"{self._base}{path}")
+            return await self._http_client().get(f"{self._base}{path}")
         except httpx.TimeoutException as error:
             raise ProviderTimeout(f"mailpit request timed out: {path}") from error
         except httpx.HTTPError as error:

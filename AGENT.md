@@ -94,6 +94,6 @@ violations. `PX` (documented extension) marks a provider failure that was failed
 ```bash
 uv sync --extra dev
 make demo        # seed + 7 end-to-end runs, offline
-make test        # 116 tests including the 32-case trap pack (also runs in CI)
+make test        # 134 tests including the 32-case trap pack (also runs in CI)
 make serve       # http://127.0.0.1:8000
 ```

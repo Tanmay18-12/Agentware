@@ -113,7 +113,7 @@ concurrent clients this can block the event loop. Local-only today.
 | BUG-07 | FIXED 2026-11-28: Mailpit `read()` reports the RFC 5322 `Message-ID` parsed from the raw message (falling back to the handle), matching the IMAP adapter so dedupe keys stay provider-independent | `adapters/mailpit_mail.py`, `tests/test_adapter_regressions.py` |
 | BUG-08 | FIXED 2026-11-28: a 409/410/5xx response now clears `_ready`, so the next call re-runs `MKCALENDAR` instead of failing until process restart | `adapters/caldav_calendar.py`, `tests/test_adapter_regressions.py` |
 | BUG-09 | FIXED 2026-11-28: `EventBus.emit` now allocates `seq`, reads `prev_hash`, inserts and appends under one lock, so concurrent emits cannot collide on `(run_id, seq)` or fork the chain; the index hash is chained under the same lock. Test: `tests/test_event_bus_concurrency.py` (40 threads, fails on the old code) | `event_bus.py` `emit` |
-| BUG-10 | A new `httpx.AsyncClient` is created per request (no pooling) | `caldav_calendar.py:200-208`, `mailpit_mail.py:36-47` |
+| BUG-10 | FIXED 2026-11-28: both HTTP adapters keep one pooled `httpx.AsyncClient` for their lifetime (rebuilt only if it was closed) and expose `aclose()`; `Services.aclose()` releases them when a watch loop stops | `adapters/caldav_calendar.py`, `adapters/mailpit_mail.py`, `cli.py`, `tests/test_adapter_pooling.py` |
 | BUG-11 | FIXED 2026-11-28: `AGENT.md` test count (68 → 116) and both docs' `file:line` references recomputed against the current tree; `SAFETY.md`'s corrupted OutputGuard sentence repaired | `AGENT.md`, `SAFETY.md` |
 | BUG-12 | FIXED 2026-11-28: stray `[TEMPLATE]` line removed; `.env.example` documents `DASHBOARD_TOKEN` | `.env.example` |
 | BUG-13 | FIXED 2026-11-28: module-level `TemporaryDirectory` cleans the shared gateway world at exit | `tests/test_policy_gateway.py` |
@@ -146,10 +146,10 @@ concurrent clients this can block the event loop. Local-only today.
 
 ## 5. Test coverage
 
-Current: **130 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
+Current: **134 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
 scheduler/DST/validator 19, kill switch 4, replay/audit 6, live reader 5, real adapters 27
 (incl. the TZID/DURATION and ambiguity regressions), approvals 3, dashboard 5, prefilter 2, concurrency 1, trap pack 33
-(32 cases + report), caldav recurrence 10, adapter regressions 4, plus helpers.
+(32 cases + report), caldav recurrence 10, adapter regressions 4, adapter pooling 4, plus helpers.
 
 Missing coverage, in priority order:
 
@@ -197,8 +197,8 @@ both with regression tests.)*
 ### Priority 3 — quality
 
 3. Structured logging with run/step IDs; keep JSONL as the audit source of truth.
-4. *(Done 2026-11-28: atomic event sequence allocation — BUG-09.)* Optional connection/HTTP
-   pooling (BUG-10) remains.
+4. *(Done 2026-11-28: atomic event sequence allocation — BUG-09 — and connection/HTTP pooling
+   — BUG-10.)*
 5. Provider cursor/`processed` state for `watch` so more than the latest N messages are handled.
 6. ICS attachment parsing (`RRULE`/`EXDATE` support landed 2026-11-28).
 7. Clean up test temp dirs (BUG-13), `.env.example` (BUG-12).
