@@ -23,7 +23,7 @@ Repository state: `main` at `9fff857`, no tagged release. CI lives in
 | Prefilter (loops/bulk/no-reply/self/blocked/rate) | COMPLETE | `pipeline/prefilter.py` | demo SKIPPED case, trap pack |
 | Injection/spoof screening before tools | COMPLETE | `pipeline/screen.py` | trap pack QUARANTINE cases (0 tool calls) |
 | Reader: stub + cassette | COMPLETE | `pipeline/reader_llm.py` | 97-test suite, demo |
-| Reader: live OpenAI-compatible | IMPLEMENTED, tested vs loopback stub | `reader_llm.py:115-177`, `tests/test_reader_live.py` | real external provider **unverified** |
+| Reader: live OpenAI-compatible | IMPLEMENTED, tested vs loopback stub | `reader_llm.py`, `tests/test_reader_live.py` | real external provider **unverified**; cost priced per model |
 | Validator (bounds, past, horizon, DST gap) | COMPLETE | `pipeline/validator.py` | scheduler/validator tests |
 | Scheduler (phrases, grid, buffers, protected blocks, scoring) | COMPLETE | `pipeline/scheduler.py` | DST tests, demo, real conflict run |
 | Decision matrix (BOOK/PROPOSE/CLARIFY/ESCALATE/FILE/QUARANTINE) | COMPLETE | `orchestrator.py:382` | demo + trap pack |
@@ -118,7 +118,7 @@ concurrent clients this can block the event loop. Local-only today.
 | BUG-12 | FIXED 2026-11-28: stray `[TEMPLATE]` line removed; `.env.example` documents `DASHBOARD_TOKEN` | `.env.example` |
 | BUG-13 | FIXED 2026-11-28: module-level `TemporaryDirectory` cleans the shared gateway world at exit | `tests/test_policy_gateway.py` |
 | BUG-14 | FIXED 2026-11-28: `MockCalendar.confirm_event` persists the passed `agent_tag` (protocol parity with CalDAV) | `adapters/mock_calendar.py` |
-| BUG-15 | Live-reader cost is a hardcoded `$0.15 / 1M tokens` estimate, not model pricing | `pipeline/reader_llm.py:176` |
+| BUG-15 | FIXED 2026-11-28: live-reader cost comes from a per-model price table (`input`/`output` USD per 1M tokens, longest prefix wins, unknown models fall back to `gpt-4o-mini` rates) applied to the provider's own `prompt_tokens`/`completion_tokens`, instead of a flat `$0.15 / 1M` over the total | `pipeline/reader_llm.py`, `tests/test_reader_live.py` |
 
 ### INFORMATIONAL
 
@@ -146,8 +146,8 @@ concurrent clients this can block the event loop. Local-only today.
 
 ## 5. Test coverage
 
-Current: **134 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
-scheduler/DST/validator 19, kill switch 4, replay/audit 6, live reader 5, real adapters 27
+Current: **137 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
+scheduler/DST/validator 19, kill switch 4, replay/audit 6, live reader 8, real adapters 27
 (incl. the TZID/DURATION and ambiguity regressions), approvals 3, dashboard 5, prefilter 2, concurrency 1, trap pack 33
 (32 cases + report), caldav recurrence 10, adapter regressions 4, adapter pooling 4, plus helpers.
 
