@@ -23,7 +23,7 @@ Repository state: `main` at `9fff857`, no tagged release. CI lives in
 | Prefilter (loops/bulk/no-reply/self/blocked/rate) | COMPLETE | `pipeline/prefilter.py` | demo SKIPPED case, trap pack |
 | Injection/spoof screening before tools | COMPLETE | `pipeline/screen.py` | trap pack QUARANTINE cases (0 tool calls) |
 | Reader: stub + cassette | COMPLETE | `pipeline/reader_llm.py` | 97-test suite, demo |
-| Reader: live OpenAI-compatible | IMPLEMENTED, tested vs loopback stub | `reader_llm.py:115-177`, `tests/test_reader_live.py` | real external provider **unverified** |
+| Reader: live OpenAI-compatible | IMPLEMENTED, tested vs loopback stub | `reader_llm.py`, `tests/test_reader_live.py` | real external provider **unverified**; cost priced per model |
 | Validator (bounds, past, horizon, DST gap) | COMPLETE | `pipeline/validator.py` | scheduler/validator tests |
 | Scheduler (phrases, grid, buffers, protected blocks, scoring) | COMPLETE | `pipeline/scheduler.py` | DST tests, demo, real conflict run |
 | Decision matrix (BOOK/PROPOSE/CLARIFY/ESCALATE/FILE/QUARANTINE) | COMPLETE | `orchestrator.py:382` | demo + trap pack |
@@ -42,7 +42,7 @@ Repository state: `main` at `9fff857`, no tagged release. CI lives in
 | Trap Pack | COMPLETE | `tests/trap_pack/` | 32/32 pass, report regenerated |
 | Gmail / Google Calendar OAuth | NOT IMPLEMENTED | — | plan COULD; use IMAP/CalDAV |
 | Reschedule/cancel of existing events | NOT IMPLEMENTED (by design) | `orchestrator.py:398-410` | always ESCALATE |
-| Attachment parsing (.ics invites) | NOT IMPLEMENTED | `pipeline/ingest.py` | non-`.ics` ignored |
+| Attachment parsing (.ics invites) | COMPLETE | `pipeline/ingest.py`, `tests/test_ingest_ics.py` | `text/calendar` parts and `*.ics` attachments are parsed and described to the reader (first three invites; the series start of a recurring invite, not its occurrences); the `ics_attachment` flag is set |
 | Multi-user / shared calendars | NOT IMPLEMENTED | — | single owner |
 | Recurring events (`RRULE`/`EXDATE`) | IMPLEMENTED for free/busy | `caldav_calendar.py` | DAILY/WEEKLY/MONTHLY/YEARLY with `INTERVAL`/`COUNT`/`UNTIL`/`BYDAY` + `EXDATE`; `BYSETPOS`/`BYMONTHDAY` unsupported; `list_events` lists the series once |
 
@@ -113,12 +113,12 @@ concurrent clients this can block the event loop. Local-only today.
 | BUG-07 | FIXED 2026-11-28: Mailpit `read()` reports the RFC 5322 `Message-ID` parsed from the raw message (falling back to the handle), matching the IMAP adapter so dedupe keys stay provider-independent | `adapters/mailpit_mail.py`, `tests/test_adapter_regressions.py` |
 | BUG-08 | FIXED 2026-11-28: a 409/410/5xx response now clears `_ready`, so the next call re-runs `MKCALENDAR` instead of failing until process restart | `adapters/caldav_calendar.py`, `tests/test_adapter_regressions.py` |
 | BUG-09 | FIXED 2026-11-28: `EventBus.emit` now allocates `seq`, reads `prev_hash`, inserts and appends under one lock, so concurrent emits cannot collide on `(run_id, seq)` or fork the chain; the index hash is chained under the same lock. Test: `tests/test_event_bus_concurrency.py` (40 threads, fails on the old code) | `event_bus.py` `emit` |
-| BUG-10 | A new `httpx.AsyncClient` is created per request (no pooling) | `caldav_calendar.py:200-208`, `mailpit_mail.py:36-47` |
+| BUG-10 | FIXED 2026-11-28: both HTTP adapters keep one pooled `httpx.AsyncClient` for their lifetime (rebuilt only if it was closed) and expose `aclose()`; `Services.aclose()` releases them when a watch loop stops | `adapters/caldav_calendar.py`, `adapters/mailpit_mail.py`, `cli.py`, `tests/test_adapter_pooling.py` |
 | BUG-11 | FIXED 2026-11-28: `AGENT.md` test count (68 → 116) and both docs' `file:line` references recomputed against the current tree; `SAFETY.md`'s corrupted OutputGuard sentence repaired | `AGENT.md`, `SAFETY.md` |
 | BUG-12 | FIXED 2026-11-28: stray `[TEMPLATE]` line removed; `.env.example` documents `DASHBOARD_TOKEN` | `.env.example` |
 | BUG-13 | FIXED 2026-11-28: module-level `TemporaryDirectory` cleans the shared gateway world at exit | `tests/test_policy_gateway.py` |
 | BUG-14 | FIXED 2026-11-28: `MockCalendar.confirm_event` persists the passed `agent_tag` (protocol parity with CalDAV) | `adapters/mock_calendar.py` |
-| BUG-15 | Live-reader cost is a hardcoded `$0.15 / 1M tokens` estimate, not model pricing | `pipeline/reader_llm.py:176` |
+| BUG-15 | FIXED 2026-11-28: live-reader cost comes from a per-model price table (`input`/`output` USD per 1M tokens, longest prefix wins, unknown models fall back to `gpt-4o-mini` rates) applied to the provider's own `prompt_tokens`/`completion_tokens`, instead of a flat `$0.15 / 1M` over the total | `pipeline/reader_llm.py`, `tests/test_reader_live.py` |
 
 ### INFORMATIONAL
 
@@ -146,13 +146,15 @@ concurrent clients this can block the event loop. Local-only today.
 
 ## 5. Test coverage
 
-Current: **130 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
-scheduler/DST/validator 19, kill switch 4, replay/audit 6, live reader 5, real adapters 27
+Current: **141 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
+scheduler/DST/validator 19, kill switch 4, replay/audit 6, live reader 8, real adapters 27
 (incl. the TZID/DURATION and ambiguity regressions), approvals 3, dashboard 5, prefilter 2, concurrency 1, trap pack 33
-(32 cases + report), caldav recurrence 10, adapter regressions 4, plus helpers.
+(32 cases + report), caldav recurrence 10, adapter regressions 4, adapter pooling 4, ics ingest 4,
+plus helpers.
 
 Missing coverage, in priority order:
 
+- Recurring invites as attachments (only the series start is described).
 - CalDAV `BYSETPOS`/`BYMONTHDAY` rules (the common shapes are covered by `tests/test_caldav_recurrence.py`).
 - `Orchestrator.approve()` and `/api/approve|reject` end-to-end.
 - Dashboard `_state`, SSE disconnect behaviour, `/api/inject` error paths.
@@ -197,10 +199,11 @@ both with regression tests.)*
 ### Priority 3 — quality
 
 3. Structured logging with run/step IDs; keep JSONL as the audit source of truth.
-4. *(Done 2026-11-28: atomic event sequence allocation — BUG-09.)* Optional connection/HTTP
-   pooling (BUG-10) remains.
+4. *(Done 2026-11-28: atomic event sequence allocation — BUG-09 — and connection/HTTP pooling
+   — BUG-10.)*
 5. Provider cursor/`processed` state for `watch` so more than the latest N messages are handled.
-6. ICS attachment parsing (`RRULE`/`EXDATE` support landed 2026-11-28).
+6. *(Done 2026-11-28: `text/calendar` attachments are parsed and described to the reader —
+   `tests/test_ingest_ics.py`.)*
 7. Clean up test temp dirs (BUG-13), `.env.example` (BUG-12).
 
 ### Priority 4 — future

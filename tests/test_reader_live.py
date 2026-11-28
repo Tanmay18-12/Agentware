@@ -17,7 +17,13 @@ import pytest
 
 from helpers import base_prefs, make_world, next_business_day
 from meetingpilot.config import Settings
-from meetingpilot.pipeline.reader_llm import ReaderLLM, ReaderUnavailable
+from meetingpilot.pipeline.reader_llm import (
+    DEFAULT_PRICING,
+    ReaderLLM,
+    ReaderUnavailable,
+    estimate_cost,
+    model_pricing,
+)
 from meetingpilot.schemas import EmailEnvelope
 
 
@@ -36,7 +42,11 @@ class _Handler(BaseHTTPRequestHandler):
         body = json.dumps(
             {
                 "choices": [{"message": {"content": reply["content"]}}],
-                "usage": {"total_tokens": reply.get("tokens", 40)},
+                "usage": {
+                    "total_tokens": reply.get("tokens", 40),
+                    "prompt_tokens": reply.get("prompt_tokens", 30),
+                    "completion_tokens": reply.get("completion_tokens", 10),
+                },
             }
         ).encode("utf-8")
         self.send_response(200)
@@ -63,9 +73,25 @@ class StubModel:
     def port(self) -> int:
         return int(self.server.server_address[1])
 
-    def queue(self, intent: dict[str, object] | str, tokens: int = 40) -> None:
+    def queue(
+        self,
+        intent: dict[str, object] | str,
+        tokens: int = 40,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+    ) -> None:
+        """Queue one reply. ``tokens`` is the provider total; the split defaults to 10 out."""
         content = intent if isinstance(intent, str) else json.dumps(intent)
-        self.responses.append({"content": content, "tokens": tokens})
+        completion = completion_tokens if completion_tokens is not None else min(10, tokens)
+        prompt = prompt_tokens if prompt_tokens is not None else tokens - completion
+        self.responses.append(
+            {
+                "content": content,
+                "tokens": tokens,
+                "prompt_tokens": prompt,
+                "completion_tokens": completion,
+            }
+        )
 
     def start(self) -> None:
         self.thread.start()
@@ -222,3 +248,25 @@ def test_live_mode_books_end_to_end(tmp_path, model):
     ]
     assert llm_calls and llm_calls[0]["payload"]["mode"] == "live"
     assert llm_calls[0]["payload"]["cassette_hit"] is False
+
+
+def test_live_mode_prices_prompt_and_completion_tokens_separately(tmp_path, model):
+    model.queue(_intent(), tokens=1_000_000, prompt_tokens=900_000, completion_tokens=100_000)
+    reader = _reader(tmp_path)
+
+    output = asyncio.run(reader.read(_envelope()))
+
+    # "stub-model" is unknown, so it prices at the default gpt-4o-mini rate: $0.15 in, $0.60 out.
+    assert output.tokens == 1_000_000
+    assert output.cost_usd == pytest.approx(0.195)
+
+
+def test_model_pricing_prefers_the_longest_known_prefix():
+    assert model_pricing("gpt-4o-mini") == (0.15, 0.60)
+    assert model_pricing("openai/gpt-4o-mini-2024-07-18") == (0.15, 0.60)
+    assert model_pricing("gpt-4o") == (2.50, 10.00)
+    assert model_pricing("some-local-model") == DEFAULT_PRICING
+
+
+def test_estimate_cost_falls_back_to_the_input_rate_for_total_only_usage():
+    assert estimate_cost("gpt-4o-mini", 0, 0, 1_000_000) == 0.15

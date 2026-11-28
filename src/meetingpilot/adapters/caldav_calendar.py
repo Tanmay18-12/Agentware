@@ -471,18 +471,29 @@ class CalDavCalendar:
         self._collection = base + quote(settings.caldav_calendar.strip("/")) + "/"
         self._ready = False
         self._cache: dict[str, dict[str, Any]] = {}
+        self._http: httpx.AsyncClient | None = None
 
     # -- plumbing ------------------------------------------------------
+    def _http_client(self) -> httpx.AsyncClient:
+        """One pooled client per adapter, so DAV connections survive between calls."""
+        if self._http is None or self._http.is_closed:
+            kwargs: dict[str, Any] = {
+                "timeout": self.settings.caldav_timeout_s,
+                "verify": self.settings.caldav_verify_tls,
+            }
+            if self.settings.caldav_user:
+                kwargs["auth"] = (self.settings.caldav_user, self.settings.caldav_password)
+            self._http = httpx.AsyncClient(**kwargs)
+        return self._http
+
     @contextlib.asynccontextmanager
     async def _client(self) -> Any:
-        kwargs: dict[str, Any] = {
-            "timeout": self.settings.caldav_timeout_s,
-            "verify": self.settings.caldav_verify_tls,
-        }
-        if self.settings.caldav_user:
-            kwargs["auth"] = (self.settings.caldav_user, self.settings.caldav_password)
-        async with httpx.AsyncClient(**kwargs) as client:
-            yield client
+        yield self._http_client()
+
+    async def aclose(self) -> None:
+        client, self._http = self._http, None
+        if client is not None:
+            await client.aclose()
 
     def _href(self, event_id: str) -> str:
         return f"{self._collection}{quote(event_id)}.ics"
