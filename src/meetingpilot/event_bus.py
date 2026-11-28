@@ -81,6 +81,11 @@ class StateStore:
             )
 
     # -- events --------------------------------------------------------
+    @property
+    def lock(self):
+        """Re-entrant store lock. Hold it across any read-modify-write (seq/hash, index)."""
+        return self._lock
+
     def next_seq(self, run_id: str) -> int:
         with self._lock:
             row = self.conn.execute(
@@ -344,34 +349,39 @@ class EventBus:
         cost_usd: float = 0.0,
         parent_id: str | None = None,
     ) -> RunEvent:
-        seq = self.store.next_seq(run_id)
-        prev_hash = self.store.last_hash(run_id)
-        record = {
-            "seq": seq,
-            "ts": now_iso(),
-            "run_id": run_id,
-            "step_id": step_id,
-            "parent_id": parent_id,
-            "type": type,
-            "payload": payload or {},
-            "cost_usd": round(float(cost_usd), 6),
-        }
-        digest = compute_hash(prev_hash, record)
-        event = RunEvent(**record, prev_hash=prev_hash, hash=digest)
-        self.store.insert_event(event)
-        with self._run_path(run_id).open("a", encoding="utf-8") as handle:
-            handle.write(canonical(event.model_dump(mode="json")) + "\n")
+        # Allocating seq + prev_hash, inserting and appending to JSONL is one critical section:
+        # two emits for the same run would otherwise claim the same seq and fork the hash chain.
+        with self.store.lock:
+            seq = self.store.next_seq(run_id)
+            prev_hash = self.store.last_hash(run_id)
+            record = {
+                "seq": seq,
+                "ts": now_iso(),
+                "run_id": run_id,
+                "step_id": step_id,
+                "parent_id": parent_id,
+                "type": type,
+                "payload": payload or {},
+                "cost_usd": round(float(cost_usd), 6),
+            }
+            digest = compute_hash(prev_hash, record)
+            event = RunEvent(**record, prev_hash=prev_hash, hash=digest)
+            self.store.insert_event(event)
+            with self._run_path(run_id).open("a", encoding="utf-8") as handle:
+                handle.write(canonical(event.model_dump(mode="json")) + "\n")
         self._publish(event.model_dump(mode="json"))
         return event
 
     def append_run_summary(self, summary: dict[str, Any]) -> None:
-        prev = self._index_hash
-        record = {"ts": now_iso(), **summary}
-        digest = compute_hash(prev, record)
-        line = {**record, "prev_hash": prev, "hash": digest}
-        with self.index_path.open("a", encoding="utf-8") as handle:
-            handle.write(canonical(line) + "\n")
-        self._index_hash = digest
+        # Same race as emit(): read the tail hash, chain and append under one lock.
+        with self.store.lock:
+            prev = self._index_hash
+            record = {"ts": now_iso(), **summary}
+            digest = compute_hash(prev, record)
+            line = {**record, "prev_hash": prev, "hash": digest}
+            with self.index_path.open("a", encoding="utf-8") as handle:
+                handle.write(canonical(line) + "\n")
+            self._index_hash = digest
         self._publish({"type": "run_summary", "payload": summary, "run_id": summary.get("run_id", "")})
 
     # -- dashboard fan-out --------------------------------------------

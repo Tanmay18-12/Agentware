@@ -12,8 +12,8 @@ bonuses, a 32-case Trap Pack, and opt-in real providers (Mailpit verified, CalDA
 tested against a fake). It is **not** production software (single process, SQLite, no auth/TLS,
 single owner).
 
-Repository state: one commit (`4e46b76 Add project files from Freebuff`) on `master` with 66 modified
-/ untracked paths after the build sessions. No branches, no tagged release, no CI.
+Repository state: `main` at `9fff857`, no tagged release. CI lives in
+`.github/workflows/test.yml` (pytest on Python 3.11 and 3.13).
 
 ## 2. Feature status
 
@@ -112,9 +112,9 @@ concurrent clients this can block the event loop. Local-only today.
 | BUG-06 | FIXED 2026-11-28: invalid `MAIL_PROVIDER`/`CALENDAR_PROVIDER` exits 2 with a one-line message instead of a traceback | `cli.py` `main` |
 | BUG-07 | Mailpit `read()` returns the Mailpit ID as `message_id` (IMAP returns the RFC Message-ID) | `adapters/mailpit_mail.py:69-84` |
 | BUG-08 | CalDAV `_ready` is cached forever; a Radicale restart mid-process yields 409/PUT failures until restart | `adapters/caldav_calendar.py:225-250` |
-| BUG-09 | `EventBus.emit` reads `seq` and `prev_hash` in separate lock acquisitions; concurrent emits for one run could collide on `(run_id, seq)` | `event_bus.py:337-352` |
+| BUG-09 | FIXED 2026-11-28: `EventBus.emit` now allocates `seq`, reads `prev_hash`, inserts and appends under one lock, so concurrent emits cannot collide on `(run_id, seq)` or fork the chain; the index hash is chained under the same lock. Test: `tests/test_event_bus_concurrency.py` (40 threads, fails on the old code) | `event_bus.py` `emit` |
 | BUG-10 | A new `httpx.AsyncClient` is created per request (no pooling) | `caldav_calendar.py:200-208`, `mailpit_mail.py:36-47` |
-| BUG-11 | `AGENT.md` says “68 tests”; `SAFETY.md` line references are stale after the cleanup (e.g. P4 now `:300`, P5 `:342`, P6 `:380`, kill watcher `:86`, `emit` `:337`) | `AGENT.md:97`, `SAFETY.md:16-23` |
+| BUG-11 | FIXED 2026-11-28: `AGENT.md` test count (68 → 116) and both docs' `file:line` references recomputed against the current tree; `SAFETY.md`'s corrupted OutputGuard sentence repaired | `AGENT.md`, `SAFETY.md` |
 | BUG-12 | FIXED 2026-11-28: stray `[TEMPLATE]` line removed; `.env.example` documents `DASHBOARD_TOKEN` | `.env.example` |
 | BUG-13 | FIXED 2026-11-28: module-level `TemporaryDirectory` cleans the shared gateway world at exit | `tests/test_policy_gateway.py` |
 | BUG-14 | FIXED 2026-11-28: `MockCalendar.confirm_event` persists the passed `agent_tag` (protocol parity with CalDAV) | `adapters/mock_calendar.py` |
@@ -146,9 +146,9 @@ concurrent clients this can block the event loop. Local-only today.
 
 ## 5. Test coverage
 
-Current: **115 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
+Current: **116 tests, all passing**. Breakdown: gateway 10 (incl. 60-example Hypothesis property),
 scheduler/DST/validator 19, kill switch 4, replay/audit 6, live reader 5, real adapters 27
-(incl. the TZID/DURATION and ambiguity regressions), approvals 3, dashboard 5, prefilter 2, trap pack 33
+(incl. the TZID/DURATION and ambiguity regressions), approvals 3, dashboard 5, prefilter 2, concurrency 1, trap pack 33
 (32 cases + report), plus helpers.
 
 Missing coverage, in priority order:
@@ -197,7 +197,8 @@ both with regression tests.)*
 ### Priority 3 — quality
 
 3. Structured logging with run/step IDs; keep JSONL as the audit source of truth.
-4. Atomic event sequence allocation (BUG-09) and optional connection/HTTP pooling (BUG-10).
+4. *(Done 2026-11-28: atomic event sequence allocation — BUG-09.)* Optional connection/HTTP
+   pooling (BUG-10) remains.
 5. Provider cursor/`processed` state for `watch` so more than the latest N messages are handled.
 6. RRULE support and ICS attachment parsing.
 7. Clean up test temp dirs (BUG-13), `.env.example` (BUG-12).
